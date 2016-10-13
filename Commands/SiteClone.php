@@ -29,8 +29,7 @@ class SiteCloneCommand extends TerminusCommand  {
   }
 
   /**
-   * Create a new site which duplicates the environments, code and content of an
-   * existing Pantheon site.
+   * Create a new site which duplicates the environments, code and content of an existing Pantheon site.
    *
    * --source-site=<site>
    * : (Required) Name of the existing site to be cloned.
@@ -60,7 +59,7 @@ class SiteCloneCommand extends TerminusCommand  {
    *
    * @return null
    */
-  public function cloneSite($args, $assoc_args) {
+  public function siteClone($args, $assoc_args) {
     //$this->output()->outputDump($assoc_args);
     //$this->input()->siteName(['args' => $assoc_args,])
 
@@ -88,26 +87,13 @@ class SiteCloneCommand extends TerminusCommand  {
     }
 
 
-    // Create the target site
-    $create_options = [
-      'label' => $target_site,
-      'site_name' => $target_site,
-      'organization_id' => $target_site_org
-    ];
-
     $create_args = [
       'label' => $target_site,
       'site' => $target_site,
       'org' => $target_site_org,
       'upstream' => $target_site_upstream
     ];
-
-    /*
-    $workflow = $this->sites->create($create_options);
-    $workflow->wait();
-    $this->workflowOutput($workflow);
-*/
-
+    
     $this->helpers->launch->launchSelf(
       [
         'command'    => 'sites',
