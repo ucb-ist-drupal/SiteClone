@@ -93,7 +93,7 @@ class SiteCloneCommand extends TerminusCommand  {
       'org' => $target_site_org,
       'upstream' => $target_site_upstream
     ];
-    
+
     $this->helpers->launch->launchSelf(
       [
         'command'    => 'sites',
