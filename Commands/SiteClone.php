@@ -107,8 +107,7 @@ class SiteCloneCommand extends TerminusCommand {
     else {
       $target_site_org = $source_site->get('organization');
     }
-
-    /*
+    
     //Create the target site
     $this->log()->info("Creating the target site...");
 
@@ -152,7 +151,6 @@ class SiteCloneCommand extends TerminusCommand {
       }
     }
 
-    */
     // Reset the target repository to a tag if requested
     if (array_key_exists('git-reset-tag', $assoc_args)) {
       $target_clone_path = $this->clone_path . $this->slash . $target_site;
