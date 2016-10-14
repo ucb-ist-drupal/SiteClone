@@ -17,6 +17,12 @@ use Terminus\Utils;
  */
 class SiteCloneCommand extends TerminusCommand {
 
+  protected $sites;
+  protected $clone_path;
+  protected $slash;
+  //not used
+  protected $oldpwd_command;
+
   /**
    * Create a new site which duplicates the environments, code and content of an existing Pantheon site.
    *
@@ -27,6 +33,19 @@ class SiteCloneCommand extends TerminusCommand {
     $options['require_login'] = TRUE;
     parent::__construct($options);
     $this->sites = new Sites();
+
+    if (Utils\isWindows()) {
+      //FIXME: need windows to test
+      $this->clone_path = 'c:\TEMP'; // ???
+      $this->slash = '\\\\';
+      $this->oldpwd_command = 'cd /d %OLDPWD%';
+    }
+    else {
+      $this->clone_path = '/tmp';
+      $this->slash = '/';
+      $this->oldpwd_command = "cd -";
+    }
+
   }
 
   /**
@@ -53,7 +72,7 @@ class SiteCloneCommand extends TerminusCommand {
    * [--target-site-git-depth]
    * : The value to assign '--depth' when cloning. (Default: No depth. Get all commits.)
    *
-   * [--tag-reset=<tag>]
+   * [--git-reset-tag=<tag>]
    * : Tag to which the target site should be reset.
    *
    * @subcommand clone
@@ -64,8 +83,7 @@ class SiteCloneCommand extends TerminusCommand {
    * @return null
    */
   public function siteClone($args, $assoc_args) {
-    //$this->output()->outputDump($assoc_args);
-    //$this->input()->siteName(['args' => $assoc_args,])
+    //TODO: Make sure there is a 'git' command.
 
     // Validate source site
     // TODO: Use site->fetch()? To prevent aborting so you can give the user a msg?  See sites->get().
@@ -90,6 +108,7 @@ class SiteCloneCommand extends TerminusCommand {
       $target_site_org = $source_site->get('organization');
     }
 
+    /*
     //Create the target site
     $this->log()->info("Creating the target site...");
 
@@ -110,7 +129,7 @@ class SiteCloneCommand extends TerminusCommand {
       return 1;
     }
 
-    // Copy customizations from the source site to the target site
+    // Git clone the code for the source and target sites
     $this->log()->info("Downloading site code...");
 
     if (array_key_exists('target-site-git-depth', $assoc_args)) {
@@ -132,6 +151,22 @@ class SiteCloneCommand extends TerminusCommand {
         $this->gitCloneSite($site, 1);
       }
     }
+
+    */
+    // Reset the target repository to a tag if requested
+    if (array_key_exists('git-reset-tag', $assoc_args)) {
+      $target_clone_path = $this->clone_path . $this->slash . $target_site;
+      if (!$this->resetGitRepositoryToTag($target_clone_path, $assoc_args['git-reset-tag'])) {
+        $message = "Failed to set repo at {clone_path} to {tag}";
+        $replacements = [
+          'clone_path' => $target_clone_path,
+          'tag' => $assoc_args['git-reset-tag']
+        ];
+        throw new TerminusException($message, $replacements, 1);
+      }
+    }
+
+    // Copy customizations from the source site to the target site
 
   }
 
@@ -160,23 +195,15 @@ class SiteCloneCommand extends TerminusCommand {
   }
 
   protected function gitCloneSite($site_name, $depth = '') {
-    if (Utils\isWindows()) {
-      //FIXME: need windows
-      $dest_dir = 'c:\TEMP'; // ???
-      $slash = '\\';
-    }
-    else {
-      $dest_dir = '/tmp';
-      $slash = '/';
-    }
 
     $output = [];
     $return = '';
 
     // If the site has already been cloned, 'git pull'
-    $clone_path = $dest_dir . $slash . $site_name;
-    if (is_dir($clone_path . $slash . '.git')) {
-      $this->log()->info("Found {clone_path}. Attempting 'git pull'.", ['clone_path' => $clone_path]);
+    $clone_path = $this->clone_path . $this->slash . $site_name;
+    if (is_dir($clone_path . $this->slash . '.git')) {
+      $this->log()
+        ->info("Found {clone_path}. Attempting 'git pull'.", ['clone_path' => $clone_path]);
       //FIXME: Following probably doesn't work on windows?
       $git_command = "cd $clone_path && git pull && cd -";
       exec($git_command, $output, $return);
@@ -197,7 +224,7 @@ class SiteCloneCommand extends TerminusCommand {
     }
 
     $git_command = $this->getConnectionInfoField($site_name, "dev", "git_command");
-    $git_command = preg_replace("/ $site_name\$/", " " . $dest_dir . $slash . $site_name, $git_command);
+    $git_command = preg_replace("/ $site_name\$/", " " . $this->clone_path . $this->slash . $site_name, $git_command);
     $this->log()
       ->info("Git cloning$depth_option {site}...", ["site" => $site_name]);
     exec($git_command . $depth_option, $output, $return);
@@ -220,6 +247,52 @@ class SiteCloneCommand extends TerminusCommand {
     }
 
     return $info;
+  }
+
+  protected function resetGitRepositoryToTag($clone_path, $tag) {
+    $output = [];
+
+    if (!$this->do_exec("cd $clone_path && git rev-list -n 1 $tag", TRUE, $output)) {
+      return FALSE;
+    }
+
+    $sha = $output[0];
+
+    if (!$this->do_exec("cd $clone_path && git reset --hard $sha", FALSE) &&
+      $this->do_exec("cd $clone_path && git push -f", FALSE)
+    ) {
+      return FALSE;
+    }
+
+    return TRUE;
+  }
+
+  //TODO: Should be in a utilities class
+  protected function do_exec($cmd, $verbose = FALSE, &$output = []) {
+    $exit = '';
+
+    if ($verbose) {
+      $this->log()->info("", ["Exec" => $cmd]);
+    }
+
+    exec($cmd, $output, $exit);
+
+    if ($exit != 0) {
+      if ($verbose) {
+        $this->log()
+          ->error("", ["Output" => implode("\n", $output)]);
+      }
+      return FALSE;
+    }
+
+    if (($verbose) && (count($output))) {
+      $this->log()
+        ->info("", ["Output" => implode("\n", $output)]);
+    }
+
+    return TRUE;
+
+
   }
 
 }
