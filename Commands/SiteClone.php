@@ -4,9 +4,11 @@
 namespace Terminus\Commands;
 
 use Terminus\Collections\Sites;
+use Terminus\Collections\TerminusCollection;
 use Terminus\Commands\TerminusCommand;
 use Terminus\Commands\SitesCommand;
 use Terminus\Exceptions\TerminusException;
+use Terminus\Models\Environment;
 use Terminus\Session;
 use Terminus\Utils;
 
@@ -63,17 +65,23 @@ class SiteCloneCommand extends TerminusCommand {
    * [--target-site-suffix=<suffix>]
    * : Target site name will be source site name suffixed with this string.
    *
-   * [--target-site-org]
+   * [--target-site-org=<organization>]
    * : The organization in which to create the target site. Defaults to source site organization.
    *
-   * [--target-site-upstream]
-   * : The upstream repository to use for the target site. Defaults to source site upstream.
+   * [--target-site-upstream=<upstream>]
+   * : The upstream repository (ID or name) to use for the target site. Defaults to source site upstream.
    *
-   * [--target-site-git-depth]
-   * : The value to assign '--depth' when cloning. (Default: No depth. Get all commits.)
+   * [--target-site-git-depth=<number>]
+   * : The value to assign '--depth' when git cloning. (Default: No depth. Get all commits.)
    *
    * [--git-reset-tag=<tag>]
    * : Tag to which the target site should be reset.
+   *
+   * [--cms=<cms>]
+   * : Name of the CMS. (Default: drupal.) (Wordpress not yet supported.)
+   *
+   * [--cms-version=<version>]
+   * : Version number for CMS.  Should be dot-separated. Left-most number should be the major version.
    *
    * @subcommand clone
    *
@@ -85,13 +93,27 @@ class SiteCloneCommand extends TerminusCommand {
   public function siteClone($args, $assoc_args) {
     //TODO: Make sure there is a 'git' command.
 
+    //TODO: Validate --cms
+
     // Validate source site
     // TODO: Use site->fetch()? To prevent aborting so you can give the user a msg?  See sites->get().
     $source_site = $this->sites->get($assoc_args['source-site']);
 
-    // Set target site name
-    $target_site = $this->targetSiteName($assoc_args);
+    // Prompt for required options
+    /*
+    if (!isset($assoc_args['cms-version'])) {
+      $assoc_args['cms-version'] = $this->input()->prompt(
+        array('message' => 'Version number for CMS.  Should be dot-separated. Left-most number should be the major version')
+      );
 
+    }
+    */
+
+    // Set site names
+    $source_site_name = $assoc_args['source-site'];
+    $target_site_name = $this->targetSiteName($assoc_args);
+
+    /**/
     // Set target site upstream
     if (array_key_exists('target-site-upstream', $assoc_args)) {
       $target_site_upstream = $assoc_args['target-site-upstream'];
@@ -107,7 +129,7 @@ class SiteCloneCommand extends TerminusCommand {
     else {
       $target_site_org = $source_site->get('organization');
     }
-    
+
     //Create the target site
     $this->log()->info("Creating the target site...");
 
@@ -116,8 +138,8 @@ class SiteCloneCommand extends TerminusCommand {
         'command' => 'sites',
         'args' => ['create',],
         'assoc_args' => [
-          'label' => $target_site,
-          'site' => $target_site,
+          'label' => $target_site_name,
+          'site' => $target_site_name,
           'org' => $target_site_org,
           'upstream' => $target_site_upstream
         ],
@@ -139,8 +161,8 @@ class SiteCloneCommand extends TerminusCommand {
     }
 
     foreach ([
-               'source' => $assoc_args['source-site'],
-               'target' => $target_site
+               'source' => $source_site_name,
+               'target' => $target_site_name
              ] as $key => $site) {
       if ($key == 'target') {
         $this->gitCloneSite($site, $depth);
@@ -153,7 +175,7 @@ class SiteCloneCommand extends TerminusCommand {
 
     // Reset the target repository to a tag if requested
     if (array_key_exists('git-reset-tag', $assoc_args)) {
-      $target_clone_path = $this->clone_path . $this->slash . $target_site;
+      $target_clone_path = $this->clone_path . $this->slash . $target_site_name;
       if (!$this->resetGitRepositoryToTag($target_clone_path, $assoc_args['git-reset-tag'])) {
         $message = "Failed to set repo at {clone_path} to {tag}";
         $replacements = [
@@ -164,8 +186,13 @@ class SiteCloneCommand extends TerminusCommand {
       }
     }
 
-    // Copy customizations from the source site to the target site
-
+    // Copy contributed code from the source site to the target site
+    $this->log()->info("Copying contributed code source site -> target site...");
+    $cms = $source_site->get('framework');
+    $cms_version = $this->getCmsVersion($cms, $source_site);
+    if (($cms !== FALSE) && ($cms_version !== FALSE)) {
+      $this->copyContribCode($cms, $cms_version, $source_site_name, $target_site_name);
+    }
   }
 
   /**
@@ -221,7 +248,7 @@ class SiteCloneCommand extends TerminusCommand {
       $depth_option = " --depth $depth";
     }
 
-    $git_command = $this->getConnectionInfoField($site_name, "dev", "git_command");
+    $git_command = $this->getConnectionInfo($site_name, "dev", "git_command");
     $git_command = preg_replace("/ $site_name\$/", " " . $this->clone_path . $this->slash . $site_name, $git_command);
     $this->log()
       ->info("Git cloning$depth_option {site}...", ["site" => $site_name]);
@@ -235,13 +262,16 @@ class SiteCloneCommand extends TerminusCommand {
     return TRUE;
   }
 
-  protected function getConnectionInfoField($site_name, $env, $field = "") {
+  protected function getConnectionInfo($site_name, $env, $field = "") {
     $site = $this->sites->get($site_name);
     $environment = $site->environments->get($env);
     $info = $environment->connectionInfo();
 
     if (!empty($field)) {
       return $info[$field];
+    }
+    else {
+      return FALSE;
     }
 
     return $info;
@@ -250,14 +280,14 @@ class SiteCloneCommand extends TerminusCommand {
   protected function resetGitRepositoryToTag($clone_path, $tag) {
     $output = [];
 
-    if (!$this->do_exec("cd $clone_path && git rev-list -n 1 $tag", TRUE, $output)) {
+    if (!$this->doExec("cd $clone_path && git rev-list -n 1 $tag", TRUE, $output)) {
       return FALSE;
     }
 
     $sha = $output[0];
 
-    if (!$this->do_exec("cd $clone_path && git reset --hard $sha", FALSE) &&
-      $this->do_exec("cd $clone_path && git push -f", FALSE)
+    if (!$this->doExec("cd $clone_path && git reset --hard $sha", FALSE) &&
+      $this->doExec("cd $clone_path && git push -f", FALSE)
     ) {
       return FALSE;
     }
@@ -265,8 +295,62 @@ class SiteCloneCommand extends TerminusCommand {
     return TRUE;
   }
 
-  //TODO: Should be in a utilities class
-  protected function do_exec($cmd, $verbose = FALSE, &$output = []) {
+  protected function copyContribCode($cms, $version, $source_site_name, $target_site_name) {
+
+    $parts = explode('.', $version);
+    $major_version = array_shift($parts);
+
+    if (($cms = "drupal") && ($major_version < 8) && ($major_version > 4)) {
+      $source_contrib_dir = $this->clone_path . DIRECTORY_SEPARATOR . $source_site_name . DIRECTORY_SEPARATOR . "sites" . DIRECTORY_SEPARATOR . "all";
+      $target_contrib_dir = $this->clone_path . DIRECTORY_SEPARATOR . $target_site_name . DIRECTORY_SEPARATOR . "sites" . DIRECTORY_SEPARATOR . "all";
+
+      if ($handle = opendir($source_contrib_dir)) {
+
+        while (FALSE !== ($item = readdir($handle))) {
+          if (($item == '.') || ($item == '..')) {
+            continue;
+          }
+
+          if (is_dir($source_contrib_dir . DIRECTORY_SEPARATOR . $item)) {
+            $this->copyDirectoryRecursively($source_contrib_dir . DIRECTORY_SEPARATOR . $item, $target_contrib_dir . DIRECTORY_SEPARATOR . $item);
+          }
+        }
+
+        closedir($handle);
+      }
+    }
+    else {
+      throw new TerminusException("copyContribCode not implemented for {cms} version {version}.", [
+        'cms' => $cms,
+        'version' => $version
+      ]);
+    }
+
+  }
+
+  protected function getCmsVersion($cms, $source_site) {
+    if ($cms == "drupal") {
+      // drush command
+      $result = $this->doFrameworkCommand($cms, $source_site, "dev", "drush st --format=json");
+      if ($result['exit_code'] != 0) {
+        $this->log()
+          ->error("Failed to determine site's {cms} version.", ["cms" => $cms]);
+        return FALSE;
+      }
+      else {
+        $data = json_decode($result['output']);
+        // deal with a hyphenated property name.
+        return $data->{'drupal-version'};
+      }
+    }
+    else {
+      throw new TerminusException("getCmsVersion not implemented for {cms}.", ['cms' => $cms]);
+    }
+
+  }
+
+  //TODO: Methods south of here should be in a utilities class
+  protected function doExec($cmd, $verbose = FALSE, &$output = []) {
     $exit = '';
 
     if ($verbose) {
@@ -289,8 +373,39 @@ class SiteCloneCommand extends TerminusCommand {
     }
 
     return TRUE;
+  }
 
+  protected function doTerminusDrush(\Terminus\Models\Site $site, $environment, $command) {
+    $this->environment = $site->environments->get($environment);
+    $result = $this->environment->sendCommandViaSsh($command);
 
+    return $result;
+  }
+
+  protected function doFrameworkCommand($cms, \Terminus\Models\Site $site, $environment, $command) {
+    if ($cms == 'drupal') {
+      return $this->doTerminusDrush($site, $environment, $command);
+    }
+    else {
+      throw new TerminusException("execFrameworkCommnd not implemented for {cms}.", ['cms' => $cms]);
+    }
+  }
+
+  //TODO: Should be in a utilities class
+  protected function copyDirectoryRecursively($source, $dest) {
+    foreach (
+      $iterator = new \RecursiveIteratorIterator(
+        new \RecursiveDirectoryIterator($source, \RecursiveDirectoryIterator::SKIP_DOTS),
+        \RecursiveIteratorIterator::SELF_FIRST) as $item
+    ) {
+      if ($item->isDir()) {
+        $subpath = $iterator->getSubPathName();
+        mkdir($dest . DIRECTORY_SEPARATOR . $subpath);
+      }
+      else {
+        copy($item, $dest . DIRECTORY_SEPARATOR . $iterator->getSubPathName());
+      }
+    }
   }
 
 }
