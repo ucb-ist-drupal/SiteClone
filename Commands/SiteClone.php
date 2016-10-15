@@ -150,6 +150,11 @@ class SiteCloneCommand extends TerminusCommand {
       return 1;
     }
 
+    // Make sure the new site is in git mode.
+    $target_site = $this->sites->get($target_site_name);
+    $this->setConnectionMode($target_site, "git");
+
+
     // Git clone the code for the source and target sites
     $this->log()->info("Downloading site code...");
 
@@ -191,8 +196,18 @@ class SiteCloneCommand extends TerminusCommand {
     $cms = $source_site->get('framework');
     $cms_version = $this->getCmsVersion($cms, $source_site);
     if (($cms !== FALSE) && ($cms_version !== FALSE)) {
-      $this->copyContribCode($cms, $cms_version, $source_site_name, $target_site_name);
+      if ($this->copyContribCode($cms, $cms_version, $source_site_name, $target_site_name)) {
+        // Commit and push the new code.
+        $this->log()->info("Pushing contributed code from {source} to {target}'s DEV environment.", ['source' => $source_site_name, 'target' => $target_site_name]);
+
+        $commit_message = "Adding contributed code from $source_site_name.";
+        if (!$this->gitAddCommitPush($this->clone_path . DIRECTORY_SEPARATOR . $target_site_name, $commit_message)) {
+          throw new TerminusException("Failed to push code to {site}", ["site" => $target_site_name]);
+        }
+      }
     }
+
+    // Deploy code to the desired target site environment.
   }
 
   /**
@@ -277,6 +292,17 @@ class SiteCloneCommand extends TerminusCommand {
     return $info;
   }
 
+  protected function setConnectionMode(\Terminus\Models\Site $site, $mode, $env = "dev") {
+    $environment = $site->environments->get($env);
+    $workflow = $environment->changeConnectionMode($mode);
+    if (is_string($workflow)) {
+      $this->log()->info($workflow);
+    } else {
+      $workflow->wait();
+      $this->workflowOutput($workflow);
+    }
+  }
+
   protected function resetGitRepositoryToTag($clone_path, $tag) {
     $output = [];
 
@@ -286,8 +312,19 @@ class SiteCloneCommand extends TerminusCommand {
 
     $sha = $output[0];
 
-    if (!$this->doExec("cd $clone_path && git reset --hard $sha", FALSE) &&
-      $this->doExec("cd $clone_path && git push -f", FALSE)
+    if (!($this->doExec("cd $clone_path && git reset --hard $sha", FALSE) &&
+      $this->doExec("cd $clone_path && git push -f", FALSE))
+    ) {
+      return FALSE;
+    }
+
+    return TRUE;
+  }
+
+  protected function gitAddCommitPush($clone_path, $commit_message = "") {
+    if (!($this->doExec("cd $clone_path && git add -A", TRUE) &&
+      $this->doExec("cd $clone_path && git commit -m \"$commit_message\"", TRUE) &&
+      $this->doExec("cd $clone_path && git push origin master", TRUE))
     ) {
       return FALSE;
     }
@@ -297,6 +334,7 @@ class SiteCloneCommand extends TerminusCommand {
 
   protected function copyContribCode($cms, $version, $source_site_name, $target_site_name) {
 
+    $code_was_copied = FALSE;
     $parts = explode('.', $version);
     $major_version = array_shift($parts);
 
@@ -312,7 +350,12 @@ class SiteCloneCommand extends TerminusCommand {
           }
 
           if (is_dir($source_contrib_dir . DIRECTORY_SEPARATOR . $item)) {
-            $this->copyDirectoryRecursively($source_contrib_dir . DIRECTORY_SEPARATOR . $item, $target_contrib_dir . DIRECTORY_SEPARATOR . $item);
+            $result = $this->copyDirectoryRecursively($source_contrib_dir . DIRECTORY_SEPARATOR . $item, $target_contrib_dir . DIRECTORY_SEPARATOR . $item);
+
+            // If $code_was_copied becomes TRUE don't set it back to FALSE.
+            if (!$code_was_copied && $result) {
+              $code_was_copied = TRUE;
+            }
           }
         }
 
@@ -326,6 +369,7 @@ class SiteCloneCommand extends TerminusCommand {
       ]);
     }
 
+    return $code_was_copied;
   }
 
   protected function getCmsVersion($cms, $source_site) {
@@ -393,6 +437,9 @@ class SiteCloneCommand extends TerminusCommand {
 
   //TODO: Should be in a utilities class
   protected function copyDirectoryRecursively($source, $dest) {
+
+    $code_was_copied = FALSE;
+
     foreach (
       $iterator = new \RecursiveIteratorIterator(
         new \RecursiveDirectoryIterator($source, \RecursiveDirectoryIterator::SKIP_DOTS),
@@ -400,12 +447,23 @@ class SiteCloneCommand extends TerminusCommand {
     ) {
       if ($item->isDir()) {
         $subpath = $iterator->getSubPathName();
-        mkdir($dest . DIRECTORY_SEPARATOR . $subpath);
+        $target_dir = $dest . DIRECTORY_SEPARATOR . $subpath;
+        if (!is_dir($target_dir)) {
+          mkdir($target_dir);
+          $code_was_copied = TRUE;
+        }
       }
       else {
-        copy($item, $dest . DIRECTORY_SEPARATOR . $iterator->getSubPathName());
+        $subpath = $iterator->getSubPathName();
+        $target_file = $dest . DIRECTORY_SEPARATOR . $subpath;
+        if (!is_file($target_file)) {
+          copy($item, $target_file);
+          $code_was_copied = TRUE;
+        }
       }
     }
+
+    return $code_was_copied;
   }
 
 }
