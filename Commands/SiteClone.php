@@ -113,7 +113,7 @@ class SiteCloneCommand extends TerminusCommand {
     $source_site_name = $assoc_args['source-site'];
     $target_site_name = $this->targetSiteName($assoc_args);
 
-    /**/
+
     // Set target site upstream
     if (array_key_exists('target-site-upstream', $assoc_args)) {
       $target_site_upstream = $assoc_args['target-site-upstream'];
@@ -133,7 +133,7 @@ class SiteCloneCommand extends TerminusCommand {
     //Create the target site
     $this->log()->info("Creating the target site...");
 
-    if (!$this->helpers->launch->launchSelf(
+    if ($this->helpers->launch->launchSelf(
       [
         'command' => 'sites',
         'args' => ['create',],
@@ -144,7 +144,7 @@ class SiteCloneCommand extends TerminusCommand {
           'upstream' => $target_site_upstream
         ],
       ]
-    )
+    ) != 0
     ) {
       $this->log()->error("Failed to create target site.  Aborting.");
       return 1;
@@ -178,6 +178,7 @@ class SiteCloneCommand extends TerminusCommand {
       }
     }
 
+    /*
     // Reset the target repository to a tag if requested
     if (array_key_exists('git-reset-tag', $assoc_args)) {
       $target_clone_path = $this->clone_path . $this->slash . $target_site_name;
@@ -208,6 +209,19 @@ class SiteCloneCommand extends TerminusCommand {
     }
 
     // Deploy code to the desired target site environment.
+    $source_site_environments = $this->getEnvironments($source_site);
+    $source_site_environments = array_column($source_site_environments, "initialized", "id");
+    if ($source_site_environments['live'] == "true") {
+      $target_site_environment = 'live';
+    }
+    elseif ($source_site_environments['test'] =="true") {
+      $target_site_environment = 'test';
+    }
+    else {
+      $target_site_environment = 'dev';
+    }
+*/
+
   }
 
   /**
@@ -278,6 +292,7 @@ class SiteCloneCommand extends TerminusCommand {
   }
 
   protected function getConnectionInfo($site_name, $env, $field = "") {
+    //FIXME: require passing the site object as in setConnectionMode. This way we don't hit the API multiple times.
     $site = $this->sites->get($site_name);
     $environment = $site->environments->get($env);
     $info = $environment->connectionInfo();
@@ -292,7 +307,19 @@ class SiteCloneCommand extends TerminusCommand {
     return $info;
   }
 
+  protected function getEnvironments(\Terminus\Models\Site $site) {
+    $env = $site->environments->all();
+    $data = array_map(
+      function ($env) {
+        return $env->serialize();
+      },
+      $site->environments->all()
+    );
+    return $data;
+  }
+
   protected function setConnectionMode(\Terminus\Models\Site $site, $mode, $env = "dev") {
+    //FIXME: require passing the env object to save API calls
     $environment = $site->environments->get($env);
     $workflow = $environment->changeConnectionMode($mode);
     if (is_string($workflow)) {
@@ -300,6 +327,22 @@ class SiteCloneCommand extends TerminusCommand {
     } else {
       $workflow->wait();
       $this->workflowOutput($workflow);
+    }
+  }
+
+  protected function deployToEnvironment($site, $to_env) {
+    if ($to_env == 'dev') {
+      return TRUE;
+    }
+    elseif ($to_env == 'test') {
+      $envs = ['test'];
+    }
+    else {
+      $envs = ['test', 'live'];
+    }
+
+    foreach ($envs as $env) {
+
     }
   }
 
