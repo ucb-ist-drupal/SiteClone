@@ -103,7 +103,20 @@ class SiteCloneCommand extends TerminusCommand {
     $source_site = $this->sites->get($assoc_args['source-site']);
 
     $source_site_environments_info = $this->getEnvironmentsInfo($source_site);
-    $source_site_environments = array_column($source_site_environments_info, "id");
+    //$source_site_environments = array_column($source_site_environments_info, "id");
+    $source_site_environments = array_column($source_site_environments_info, "initialized", "id");
+
+    // Deploy code to the same envinornment as the source site.
+    //FIXME: Needed?
+    if ($source_site_environments['live'] == "true") {
+      $target_site_environment = 'live';
+    }
+    elseif ($source_site_environments['test'] == "true") {
+      $target_site_environment = 'test';
+    }
+    else {
+      $target_site_environment = 'dev';
+    }
 
 
     // Prompt for required options
@@ -123,90 +136,92 @@ class SiteCloneCommand extends TerminusCommand {
     $source_clone_path = $this->clone_path . DIRECTORY_SEPARATOR . $source_site_name;
     $target_clone_path = $this->clone_path . DIRECTORY_SEPARATOR . $target_site_name;
 
-/**/
-    // Set target site upstream
-    if (array_key_exists('target-site-upstream', $assoc_args)) {
-      $target_site_upstream = $assoc_args['target-site-upstream'];
-    }
-    else {
-      $target_site_upstream = $source_site->upstream->id;
-    }
+    /*    */
+        // Set target site upstream
+        if (array_key_exists('target-site-upstream', $assoc_args)) {
+          $target_site_upstream = $assoc_args['target-site-upstream'];
+        }
+        else {
+          $target_site_upstream = $source_site->upstream->id;
+        }
 
-    // Set target site org
-    if (array_key_exists('target-site-org', $assoc_args)) {
-      $target_site_org = $assoc_args['target-site-org'];
-    }
-    else {
-      $target_site_org = $source_site->get('organization');
-    }
+        // Set target site org
+        if (array_key_exists('target-site-org', $assoc_args)) {
+          $target_site_org = $assoc_args['target-site-org'];
+        }
+        else {
+          $target_site_org = $source_site->get('organization');
+        }
 
-    //Create the target site
-    $this->log()->info("Creating the target site...");
+        //Create the target site
+        $this->log()->info("Creating the target site...");
 
-    if ($this->helpers->launch->launchSelf(
-        [
-          'command' => 'sites',
-          'args' => ['create',],
-          'assoc_args' => [
-            'label' => $target_site_name,
-            'site' => $target_site_name,
-            'org' => $target_site_org,
-            'upstream' => $target_site_upstream
-          ],
-        ]
-      ) != 0
-    ) {
-      $this->log()->error("Failed to create target site.  Aborting.");
-      return 1;
-    }
+        if ($this->helpers->launch->launchSelf(
+            [
+              'command' => 'sites',
+              'args' => ['create',],
+              'assoc_args' => [
+                'label' => $target_site_name,
+                'site' => $target_site_name,
+                'org' => $target_site_org,
+                'upstream' => $target_site_upstream
+              ],
+            ]
+          ) != 0
+        ) {
+          $this->log()->error("Failed to create target site.  Aborting.");
+          return 1;
+        }
 
-    // Make sure the new site is in git mode.
-    $target_site = $this->sites->get($target_site_name);
-    $this->setConnectionMode($target_site, "git");
+        // Make sure the new site is in git mode.
+        $target_site = $this->sites->get($target_site_name);
+        $this->setConnectionMode($target_site, "git");
 
 
-    // Git clone the code for the source and target sites
-    $this->log()->info("Downloading site code...");
+        // Git clone the code for the source and target sites
+        $this->log()->info("Downloading site code...");
 
-    foreach ([
-               'source' => $source_site_name,
-               'target' => $target_site_name
-             ] as $key => $site) {
+        foreach ([
+                   'source' => $source_site_name,
+                   'target' => $target_site_name
+                 ] as $key => $site) {
 
-      if (array_key_exists($key . '-site-git-depth', $assoc_args)) {
-        $depth = $assoc_args[$key . '-site-git-depth'];
-      }
-      else {
-        $depth = '';
-      }
+          if (array_key_exists($key . '-site-git-depth', $assoc_args)) {
+            $depth = $assoc_args[$key . '-site-git-depth'];
+          }
+          else {
+            $depth = '';
+          }
 
-      $this->gitCloneSite($site, $depth);
-    }
+          $this->gitCloneSite($site, $depth);
+        }
 
-    $this->log()
-      ->info("Merging {source} code into {target}", [
-        'source' => $source_site_name,
-        'target' => $target_site_name
-      ]);
+        $this->log()
+          ->info("Merging {source} code into {target}", [
+            'source' => $source_site_name,
+            'target' => $target_site_name
+          ]);
 
-    if (!$this->doExec("cd $target_clone_path && git pull ../$source_site_name --no-squash")) {
-      throw new TerminusException("Failed to merge {source} code into {target}", [
-        'source' => $source_site_name,
-        'target' => $target_site_name
-      ]);
-    }
+        if (!$this->doExec("cd $target_clone_path && git pull ../$source_site_name --no-squash")) {
+          throw new TerminusException("Failed to merge {source} code into {target}", [
+            'source' => $source_site_name,
+            'target' => $target_site_name
+          ]);
+        }
 
-    $output = [];
-    if (!$this->doExec("cd $source_clone_path && git log --pretty=format:%h -1", "", $output)) {
-      throw new TerminusException("Failed to find latest commit for {source} repository", ['source' => $this->clone_path . DIRECTORY_SEPARATOR . $source_site_name]);
-    }
+        $output = [];
+        if (!$this->doExec("cd $source_clone_path && git log --pretty=format:%h -1", "", $output)) {
+          throw new TerminusException("Failed to find latest commit for {source} repository", ['source' => $this->clone_path . DIRECTORY_SEPARATOR . $source_site_name]);
+        }
 
-    if (!$this->gitResetRepository($target_clone_path, $output[0])) {
-      throw new TerminusException("Failed to reset {target} reposistory to latest commit.", ['target' => $this->clone_path . DIRECTORY_SEPARATOR . $target_site_name]);
-    }
+        if (!$this->gitResetRepository($target_clone_path, $output[0])) {
+          throw new TerminusException("Failed to reset {target} reposistory to latest commit.", ['target' => $this->clone_path . DIRECTORY_SEPARATOR . $target_site_name]);
+        }
 
-    foreach ($source_site_environments as $environment) {
-      if ($environment == "dev") {
+
+    // Find undeployed commits for each environment.
+    foreach ($source_site_environments as $environment => $initialized) {
+      if (($environment == "dev") || ($initialized != "true")) {
         continue;
       }
       $env = $this->getEnvironment($source_site, $environment);
@@ -214,7 +229,6 @@ class SiteCloneCommand extends TerminusCommand {
     }
 
     // Throws an error if there is a failure.
-    //LEFT OFF 10/17
     $this->recreateEnvironmentCode($target_site_name, $deployable_commits);
 
     /*
@@ -246,17 +260,6 @@ class SiteCloneCommand extends TerminusCommand {
       }
     }
 
-    // Deploy code to the desired target site environment.
-    $source_site_environments_info = array_column($source_site_environments, "initialized", "id");
-    if ($source_site_environments['live'] == "true") {
-      $target_site_environment = 'live';
-    }
-    elseif ($source_site_environments['test'] =="true") {
-      $target_site_environment = 'test';
-    }
-    else {
-      $target_site_environment = 'dev';
-    }
 */
 
   }
@@ -357,14 +360,24 @@ class SiteCloneCommand extends TerminusCommand {
 
     $clone_path = $this->clone_path . DIRECTORY_SEPARATOR . $site_name;
     //FIXME: Is there a programmatic way of determining the name of the command?
-    $deploy_note = "Deploy by 'terminus site clone'";
+    $deploy_note = "Deployed by 'terminus site clone'";
 
+    // If the source site has not initialized test nor live environments.
+    if (!array_key_exists('live', $env_deployable_commits) && !array_key_exists('test', $env_deployable_commits)) {
+      if (!$this->doExec("cd $clone_path && git push -f", TRUE)) {
+        throw new TerminusException("Failed to recreate code for dev environment.");
+      }
+
+      return TRUE;
+    }
 
     // If there are no pending commits in test or live
-    if (($env_deployable_commits['live'] == 0) && ($env_deployable_commits['dev'] == 0)) {
+    if (array_key_exists('live', $env_deployable_commits) && array_key_exists('test', $env_deployable_commits) &&
+      ($env_deployable_commits['live'] == 0) && ($env_deployable_commits['test'] == 0)
+    ) {
       // we can deploy the dev code all the way to live
       if (!($this->doExec("cd $clone_path && git push -f", TRUE) &&
-        $this->deployToEnvironment($site_name, "live")
+        $this->deployToEnvironment($site_name, "live", $deploy_note)
       )
       ) {
         throw new TerminusException("Failed to recreate code for live environment.");
@@ -372,17 +385,17 @@ class SiteCloneCommand extends TerminusCommand {
 
       return TRUE;
     }
-    else {
-      // We'll do some merges to create the code for test and/or live. First make a copy of the repo's original state.
-      if (!($this->doExec("cd $clone_path && git checkout -b original", TRUE) &&
-        $this->doExec("cd $clone_path && git checkout master", TRUE))
-      ) {
-        throw new TerminusException("Failed to create branch with original copy of code.");
-      }
+
+    // We'll do some merges to create the code for test and/or live. First make a copy of the repo's original state.
+    if (!($this->doExec("cd $clone_path && git checkout -b original", TRUE) &&
+      $this->doExec("cd $clone_path && git checkout master", TRUE))
+    ) {
+      throw new TerminusException("Failed to create branch with original copy of code.");
     }
 
+
     // Do Live...
-    if ($env_deployable_commits['live'] > 0) {
+    if (array_key_exists('live', $env_deployable_commits) && $env_deployable_commits['live'] > 0) {
       // git reset HEAD~0 returns exit status of 0
       $number_commits = $env_deployable_commits['live'] + $env_deployable_commits['test'];
       if (!($this->doExec("cd $clone_path && git reset --hard HEAD~$number_commits", TRUE) &&
@@ -402,7 +415,7 @@ class SiteCloneCommand extends TerminusCommand {
     }
 
     // ...then do Test...
-    if ($env_deployable_commits['test'] > 0) {
+    if (array_key_exists('test', $env_deployable_commits) && $env_deployable_commits['test'] > 0) {
 
       if (!($this->doExec("cd $clone_path && git reset --hard HEAD~" . $env_deployable_commits['test'], TRUE) &&
         $this->doExec("cd $clone_path && git push -f", TRUE)
@@ -439,7 +452,7 @@ class SiteCloneCommand extends TerminusCommand {
       // No pending commits in Test -- Test is at the same commit as dev
       if (!($this->doExec("cd $clone_path && git push -f", TRUE) &&
         // push commits to dev and test
-        $this->deployToEnvironment($site_name, "test")
+        $this->deployToEnvironment($site_name, "test", $deploy_note)
       )
       ) {
         throw new TerminusException("Failed to recreate code for test environment.");
@@ -474,8 +487,11 @@ class SiteCloneCommand extends TerminusCommand {
     }
 
     foreach ($envs as $env) {
-      $this->log()->info("Deploying {site} code to {env}.", ['site' => $site, 'env' => $env]);
-      
+      $this->log()->info("Deploying {site} code to {env}.", [
+        'site' => $site,
+        'env' => $env
+      ]);
+
       if ($this->helpers->launch->launchSelf(
           [
             'command' => 'site',
@@ -488,7 +504,11 @@ class SiteCloneCommand extends TerminusCommand {
           ]
         ) != 0
       ) {
-        $this->log()->error("Failed to deploy {site} to {env}.", ['site' => $site, 'env' => $to_env]);
+        $this->log()
+          ->error("Failed to deploy {site} to {env}.", [
+            'site' => $site,
+            'env' => $to_env
+          ]);
         return FALSE;
       }
     }
