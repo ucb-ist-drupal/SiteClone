@@ -251,7 +251,7 @@ class SiteCloneCommand extends TerminusCommand {
         'database',
         'files'
       ]);
-      */
+
       if (!isset($assoc_args['no-disable-smtp'])) {
         if ($message_once) {
           $this->log()->info("Disabling smtp_host on target site.");
@@ -272,6 +272,8 @@ class SiteCloneCommand extends TerminusCommand {
         // now there's no way a user could get an auto-generated email.
         $this->doFrameworkCommand($target_site, $environment, "drush sqlq \"update users set mail = '' where uid <> 0\"");
       }
+            */
+      $this->updateObPathologic($target_site, $environment);
     }
     /*
     // Reset the target repository to a tag if requested
@@ -745,12 +747,43 @@ class SiteCloneCommand extends TerminusCommand {
   }
 
   protected function doFrameworkCommand(\Terminus\Models\Site $site, $environment, $command) {
-    if ($site->get('framework') == 'drupal') {
+    $framework = $site->get('framework');
+
+    if ($framework == 'drupal') {
       return $this->doTerminusDrush($site, $environment, $command);
     }
     else {
-      throw new TerminusException("execFrameworkCommnd not implemented for {cms}.", ['cms' => $cms]);
+      throw new TerminusException("execFrameworkCommnd not implemented for {cms}.", ['cms' => $framework]);
     }
+  }
+
+  protected function updateObPathologic(\Terminus\Models\Site $site, $env) {
+    $target_site_name = $site->get("name");
+
+    $new_paths="http://dev-$target_site_name.pantheon.berkeley.edu/\nhttp://test-$target_site_name.pantheon.berkeley.edu/\nhttp://live-$target_site_name.pantheon.berkeley.edu/\nhttp://dev-$target_site_name.pantheonsite.io/\nhttp://test-$target_site_name.pantheonsite.io/\nhttp://live-$target_site_name.pantheonsite.io/\nhttp://$target_site_name.berkeley.edu\nhttp://$target_site_name.localhost";
+
+    $result = $this->doFrameworkCommand($site, $env, "drush vget openberkeley_wysiwyg_override_pathologic_paths");
+
+    if ($result['exit_code'] != 0) {
+      $this->log()->error("Failed to get OB Pathologic paths for {site} {env}", ['site' => $target_site_name, 'env' => $env]);
+      return FALSE;
+    }
+
+    $old_paths = str_replace("openberkeley_wysiwyg_override_pathologic_paths: ", "", $result['output']);
+    $old_paths = str_replace('"', '', $old_paths);
+    $old_paths = str_replace('\r\n', "\n", $old_paths);
+
+    // prepend new paths to old with new line.
+    $paths = "$new_paths\n$old_paths";
+//    $paths = "this\rthat\nother\r\nanother";
+    $result = [];
+    $result = $this->doFrameworkCommand($site, $env, "drush vset openberkeley_wysiwyg_override_pathologic_paths '$paths'");
+
+    if ($result['exit_code'] != 0) {
+      $this->log()->error("Failed to set OB Pathologic paths for {site} {env}", ['site' => $target_site_name, 'env' => $env]);
+      return FALSE;
+    }
+
   }
 
   //TODO: Should be in a utilities class
