@@ -83,8 +83,11 @@ class SiteCloneCommand extends TerminusCommand {
    * [--git-reset-tag=<tag>]
    * : Tag to which the target site should be reset.
    *
-   * [--cms=<cms>]
-   * : Name of the CMS. (Default: drupal.) (Wordpress not yet supported.)
+   * [--no-disable-smtp]
+   * : Do not disable SMTP. Usually it's best to ensure that no mail can be sent from a cloned site.
+   *
+   * [--no-remove-emails]
+   * : Do not remove all user emails. Usually it's best to ensure that no mail can be sent from a cloned site.
    *
    * [--cms-version=<version>]
    * : Version number for CMS.  Should be dot-separated. Left-most number should be the major version.
@@ -177,7 +180,9 @@ class SiteCloneCommand extends TerminusCommand {
             }
 
             // Make sure the new site is in git mode.
+    */
             $target_site = $this->sites->get($target_site_name);
+    /*
             $this->setConnectionMode($target_site, "git");
 
 
@@ -236,14 +241,37 @@ class SiteCloneCommand extends TerminusCommand {
          */
 
     reset($source_site_environments);
+    $message_once = TRUE;
     foreach ($source_site_environments as $environment => $initialized) {
       if ($initialized != "true") {
         continue;
       }
+      /*
       $this->loadContentFromBackup($source_site, $environment, $target_site_name, $environment, [
         'database',
         'files'
       ]);
+      */
+      if (!isset($assoc_args['no-disable-smtp'])) {
+        if ($message_once) {
+          $this->log()->info("Disabling smtp_host on target site.");
+          $message_once = FALSE;
+        }
+
+        // smtp_host is used by smtp module.  lazily not checking if that module exists.
+        // not sure if there is a fallback to localhost smtp if smtp_host is unset or null...
+        $this->doFrameworkCommand($target_site, $environment, "drush vset smtp_host 'NOEMAIL-FROM-CLONED-SITE.example.com'");
+      }
+
+      if (!isset($assoc_args['no-remove-emails'])) {
+        if ($message_once) {
+          $this->log()->info("Removing emails from users on target site.");
+          $message_once = FALSE;
+        }
+
+        // now there's no way a user could get an auto-generated email.
+        $this->doFrameworkCommand($target_site, $environment, "drush sqlq \"update users set mail = '' where uid <> 0\"");
+      }
     }
     /*
     // Reset the target repository to a tag if requested
@@ -665,7 +693,7 @@ class SiteCloneCommand extends TerminusCommand {
   protected function getCmsVersion($cms, $source_site) {
     if ($cms == "drupal") {
       // drush command
-      $result = $this->doFrameworkCommand($cms, $source_site, "dev", "drush st --format=json");
+      $result = $this->doFrameworkCommand($source_site, "dev", "drush st --format=json");
       if ($result['exit_code'] != 0) {
         $this->log()
           ->error("Failed to determine site's {cms} version.", ["cms" => $cms]);
@@ -716,8 +744,8 @@ class SiteCloneCommand extends TerminusCommand {
     return $result;
   }
 
-  protected function doFrameworkCommand($cms, \Terminus\Models\Site $site, $environment, $command) {
-    if ($cms == 'drupal') {
+  protected function doFrameworkCommand(\Terminus\Models\Site $site, $environment, $command) {
+    if ($site->get('framework') == 'drupal') {
       return $this->doTerminusDrush($site, $environment, $command);
     }
     else {
