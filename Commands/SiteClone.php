@@ -4,6 +4,7 @@
 namespace Terminus\Commands;
 
 use Terminus\Collections\Sites;
+use Terminus\Config;
 use Terminus\Exceptions\TerminusException;
 use Terminus\Utils;
 
@@ -98,7 +99,6 @@ class SiteCloneCommand extends TerminusCommand {
     $source_site = $this->sites->get($assoc_args['source-site']);
 
     $source_site_environments_info = $this->getEnvironmentsInfo($source_site);
-    //$source_site_environments = array_column($source_site_environments_info, "id");
     $source_site_environments = array_column($source_site_environments_info, "initialized", "id");
 
     // Deploy code to the same envinornment as the source site.
@@ -127,6 +127,10 @@ class SiteCloneCommand extends TerminusCommand {
     }
     else {
       $target_site_upstream = $source_site->upstream->id;
+    }
+
+    if (empty($target_site_upstream)) {
+      throw new TerminusException("The upstream for this site is null.");
     }
 
     // Set target site org
@@ -215,6 +219,9 @@ class SiteCloneCommand extends TerminusCommand {
     // Throws an error if there is a failure.
     $this->recreateEnvironmentCode($target_site_name, $deployable_commits);
 
+    //TODO: Hook transform code
+    $this->fixObSettingsDns($target_site_name);
+
     reset($source_site_environments);
     $message_once = TRUE;
     foreach ($source_site_environments as $environment => $initialized) {
@@ -226,6 +233,8 @@ class SiteCloneCommand extends TerminusCommand {
         'database',
         'files'
       ]);
+
+      //TODO: Hook transform content
 
       if (!isset($assoc_args['no-disable-smtp'])) {
         if ($message_once) {
@@ -250,6 +259,18 @@ class SiteCloneCommand extends TerminusCommand {
 
       $this->updateObPathologic($target_site, $environment);
     }
+
+    $this->log()->info("Cleaning up local git working directories.");
+    if (!unlink($target_clone_path) || !unlink($source_clone_path)) {
+      $this->log()
+        ->error("Failed to clean up one or more local git working directories. See {path}", ['path' => $this->clone_path]);
+    }
+
+
+    $this->output()->outputValue($this->getSiteUrls($source_site), "\nSOURCE SITE URLs (for reference)");
+    $this->output()->outputValue($this->getSiteUrls($target_site), "\nTARGET SITE URLs");
+
+
   }
 
   /**
@@ -769,6 +790,99 @@ class SiteCloneCommand extends TerminusCommand {
     }
 
     return $code_was_copied;
+  }
+
+  protected function getPantheonDevUrl() {
+    //TODO: implement hook
+    return "pantheon.io";
+  }
+
+  protected function getSiteUrls(\Terminus\Models\Site $site) {
+    $target_site_env_info = $this->getEnvironmentsInfo($site);
+    $target_site_environments = array_column($target_site_env_info, 'initialized', 'id');
+    $target_site_name = $site->get('name');
+    $pantheon_dev_domain = $this->getPantheonDevUrl();
+
+    $env_urls = [];
+    foreach($target_site_environments as $env => $initialized) {
+      if ($initialized != "true") {
+        continue;
+      }
+      $env_urls[$env] = "http://$env-$target_site_name.$pantheon_dev_domain";
+    }
+
+    $dashbaord_url = sprintf(
+      '%s://%s/sites/%s%s',
+      Config::get('dashboard_protocol'),
+      Config::get('dashboard_host'),
+      $site->id,
+      "#dev"
+    );
+
+    $site_urls = "\n";
+
+    if (isset($env_urls['dev'])) {
+      $site_urls .= $env_urls['dev'] . "\n";
+    }
+    if (isset($env_urls['test'])) {
+      $site_urls .= $env_urls['test'] . "\n";
+    }
+    if (isset($env_urls['live'])) {
+      $site_urls .= $env_urls['live'] . "\n";
+    }
+    $site_urls .= "\nDashboard URL:\n";
+    $site_urls .= $dashbaord_url;
+
+    return $site_urls;
+  }
+
+  protected function fixObSettingsDns($target_site_name) {
+    $clone_path = $this->clone_path . DIRECTORY_SEPARATOR . $target_site_name;
+    $path_to_settings_dns = $clone_path . DIRECTORY_SEPARATOR . "sites" . DIRECTORY_SEPARATOR . "default" . DIRECTORY_SEPARATOR . "settings_dns.php";
+
+    if (!is_file($path_to_settings_dns) || !is_readable($path_to_settings_dns)) {
+      $this->log()
+        ->error("{function}: Doesn't exist or not readable: {file}", [
+          'function' => __FUNCTION__,
+          'file' => $path_to_settings_dns
+        ]);
+      return FALSE;
+    }
+
+    include($path_to_settings_dns);
+    $settings_dns = _openberkeley_dns();
+    $settings_dns['site_name'] = $target_site_name;
+    $settings_dns['live'] = '';
+    $settings_dns['ssl'] = FALSE;
+    $data = file_get_contents($path_to_settings_dns);
+    $replacement = "*/
+    
+function _openberkeley_dns() {
+  return ";
+    $replacement .= var_export($settings_dns, TRUE);
+    $replacement .= ';
+}';
+
+    $new_code = preg_replace("/\*\/\s+function _openberkeley_dns\(\) {[^}]+}/m", $replacement, $data);
+
+    if (!file_put_contents($path_to_settings_dns, $new_code)) {
+      $this->log()
+        ->error("{function}: Failed to write to {file}", [
+          'function' => __FUNCTION__,
+          'file' => $path_to_settings_dns
+        ]);
+      return FALSE;
+    }
+
+    if (!$this->gitAddCommitPush($this->clone_path . DIRECTORY_SEPARATOR . $target_site_name, "Revised settings_dns() for cloned site.")) {
+      $this->log()
+        ->error("{function}: Failed commit new {file}.", [
+          'function' => __FUNCTION__,
+          'file' => $path_to_settings_dns
+        ]);
+    }
+
+    return TRUE;
   }
 
 }
