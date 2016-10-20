@@ -4,6 +4,7 @@
 namespace Terminus\Commands;
 
 use Terminus\Collections\Sites;
+use Terminus\Config;
 use Terminus\Exceptions\TerminusException;
 use Terminus\Utils;
 
@@ -15,10 +16,8 @@ use Terminus\Utils;
 class SiteCloneCommand extends TerminusCommand {
 
   protected $sites;
-  protected $clone_path;
-  protected $slash;
-  //not used
-  protected $oldpwd_command;
+  //TODO: Programmatically determine command name (set in annotations).
+  private $deploy_note = "Deployed by 'terminus site clone'";
 
   /**
    * Create a new site which duplicates the environments, code and content of an existing Pantheon site.
@@ -34,13 +33,9 @@ class SiteCloneCommand extends TerminusCommand {
     if (Utils\isWindows()) {
       //FIXME: need windows to test
       $this->clone_path = 'c:\TEMP'; // ???
-      $this->slash = '\\\\';
-      $this->oldpwd_command = 'cd /d %OLDPWD%';
     }
     else {
       $this->clone_path = '/tmp';
-      $this->slash = '/';
-      $this->oldpwd_command = "cd -";
     }
 
   }
@@ -81,6 +76,9 @@ class SiteCloneCommand extends TerminusCommand {
    * [--no-remove-emails]
    * : Do not remove all user emails. Usually it's best to ensure that no mail can be sent from a cloned site.
    *
+   * [--debug]
+   * : Do not clean up the git working directories.
+   *
    * @subcommand clone
    *
    * @param array $args Array of main arguments
@@ -98,7 +96,6 @@ class SiteCloneCommand extends TerminusCommand {
     $source_site = $this->sites->get($assoc_args['source-site']);
 
     $source_site_environments_info = $this->getEnvironmentsInfo($source_site);
-    //$source_site_environments = array_column($source_site_environments_info, "id");
     $source_site_environments = array_column($source_site_environments_info, "initialized", "id");
 
     // Deploy code to the same envinornment as the source site.
@@ -120,13 +117,16 @@ class SiteCloneCommand extends TerminusCommand {
     $source_clone_path = $this->clone_path . DIRECTORY_SEPARATOR . $source_site_name;
     $target_clone_path = $this->clone_path . DIRECTORY_SEPARATOR . $target_site_name;
 
-
     // Set target site upstream
     if (array_key_exists('target-site-upstream', $assoc_args)) {
       $target_site_upstream = $assoc_args['target-site-upstream'];
     }
     else {
       $target_site_upstream = $source_site->upstream->id;
+    }
+
+    if (empty($target_site_upstream)) {
+      throw new TerminusException("The upstream for this site is null.");
     }
 
     // Set target site org
@@ -193,63 +193,54 @@ class SiteCloneCommand extends TerminusCommand {
       ]);
     }
 
+    // Find the latest commit sha for the source site.
     $output = [];
     if (!$this->doExec("cd $source_clone_path && git log --pretty=format:%h -1", "", $output)) {
-      throw new TerminusException("Failed to find latest commit for {source} repository", ['source' => $this->clone_path . DIRECTORY_SEPARATOR . $source_site_name]);
+      throw new TerminusException("Failed to find latest commit for {source} repository", ['source' => $source_clone_path]);
     }
-
+    // Reset the target site to the latest commit sha for the source site.
     if (!$this->gitResetRepository($target_clone_path, $output[0])) {
-      throw new TerminusException("Failed to reset {target} reposistory to latest commit.", ['target' => $this->clone_path . DIRECTORY_SEPARATOR . $target_site_name]);
+      throw new TerminusException("Failed to reset {target} reposistory to latest commit.", ['target' => $target_clone_path]);
     }
 
-
-    // Find undeployed commits for each environment.
-    foreach ($source_site_environments as $environment => $initialized) {
-      if (($environment == "dev") || ($initialized != "true")) {
-        continue;
-      }
-      $env = $this->getEnvironment($source_site, $environment);
-      $deployable_commits[$environment] = $env->countDeployableCommits();
+    // Deploy to Dev
+    if (!$this->doExec("cd $target_clone_path && git push -f", TRUE)) {
+      throw new TerminusException("Failed to recreate code for dev environment.");
     }
 
-    // Throws an error if there is a failure.
-    $this->recreateEnvironmentCode($target_site_name, $deployable_commits);
+    //TODO: Hook transform code
+    $this->fixObSettingsDns($target_site_name);
 
-    reset($source_site_environments);
-    $message_once = TRUE;
-    foreach ($source_site_environments as $environment => $initialized) {
-      if ($initialized != "true") {
-        continue;
-      }
+    // Copy code from source environments to target environments, preserving pending commits, if they exist.
+    $this->recreateEnvironmentCode($source_site, $source_site_environments, $target_site_name, $assoc_args);
 
-      $this->loadContentFromBackup($source_site, $environment, $target_site_name, $environment, [
-        'database',
-        'files'
-      ]);
+    // Copy content (db, files) from source environments to target environments.
+    $this->recreateEnvironmentContent($source_site, $source_site_environments, $target_site, $assoc_args);
 
-      if (!isset($assoc_args['no-disable-smtp'])) {
-        if ($message_once) {
-          $this->log()->info("Disabling smtp_host on target site.");
-          $message_once = FALSE;
+    if (!isset($assoc_args['debug'])) {
+      $this->log()->info("Cleaning up local git working directories.");
+      foreach ([$source_clone_path, $target_clone_path] as $path) {
+        //FIXME: Windows compatibility...
+        if ((!$this->doExec("rm -rf $path" . DIRECTORY_SEPARATOR . '.git') &&
+          $this->doExec("rm -rf $path"))
+        ) {
+          $this->log()->info("Failed to remove {path}", ['path' => $path]);
         }
-
-        // smtp_host is used by smtp module.  lazily not checking if that module exists.
-        // not sure if there is a fallback to localhost smtp if smtp_host is unset or null...
-        $this->doFrameworkCommand($target_site, $environment, "drush vset smtp_host 'NOEMAIL-FROM-CLONED-SITE.example.com'");
       }
-
-      if (!isset($assoc_args['no-remove-emails'])) {
-        if ($message_once) {
-          $this->log()->info("Removing emails from users on target site.");
-          $message_once = FALSE;
-        }
-
-        // now there's no way a user could get an auto-generated email.
-        $this->doFrameworkCommand($target_site, $environment, "drush sqlq \"update users set mail = '' where uid <> 0\"");
-      }
-
-      $this->updateObPathologic($target_site, $environment);
     }
+    else {
+      $this->log()
+        ->warning("Debug mode. Git working directories not removed: {src}, {target}", [
+          'src' => $source_clone_path,
+          'target' => $target_clone_path
+        ]);
+    }
+
+    $this->output()
+      ->outputValue($this->getSiteUrls($source_site), "\nSOURCE SITE URLs (for reference)");
+    $this->output()
+      ->outputValue($this->getSiteUrls($target_site), "\nTARGET SITE URLs");
+
   }
 
   /**
@@ -301,7 +292,7 @@ class SiteCloneCommand extends TerminusCommand {
     }
 
     $git_command = $this->getConnectionInfo($site_name, "dev", "git_command");
-    $git_command = preg_replace("/ $site_name\$/", " " . $this->clone_path . $this->slash . $site_name, $git_command);
+    $git_command = preg_replace("/ $site_name\$/", " " . $this->clone_path . DIRECTORY_SEPARATOR . $site_name, $git_command);
     $this->log()
       ->info("Git cloning$depth_option {site}...", ["site" => $site_name]);
 
@@ -329,6 +320,7 @@ class SiteCloneCommand extends TerminusCommand {
     return $info;
   }
 
+  //TODO: Don't need this function.
   protected function getEnvironment(\Terminus\Models\Site $site, $env) {
     return $site->environments->get($env);
   }
@@ -344,35 +336,60 @@ class SiteCloneCommand extends TerminusCommand {
     return $data;
   }
 
-  protected function recreateEnvironmentCode($site_name, array $env_deployable_commits) {
+  protected function getEnvironmentsDeployableCommits(\Terminus\Models\Site $site, $environments) {
+    foreach ($environments as $environment => $initialized) {
+      // Skip dev and multidev environments.
+      if ($environment == "dev" || !in_array($environment, ['test', 'live'])) {
+        continue;
+      }
+      if ($initialized == "true") {
+        $env = $this->getEnvironment($site, $environment);
+        $deployable_commits[$environment] = $env->countDeployableCommits();
+      }
+      else {
+        $deployable_commits[$environment] = 0;
+      }
+    }
+
+    return $deployable_commits;
+  }
+
+  protected function recreateEnvironmentCode(\Terminus\Models\site $source_site, $source_site_environments, $target_site_name) {
+    $target_clone_path = $this->clone_path . DIRECTORY_SEPARATOR . $target_site_name;
+
+    // Determine if there are undeployed commits for each environment.
+    $deployable_commits = $this->getEnvironmentsDeployableCommits($source_site, $source_site_environments);
+
+    // If live is initialized and there are no pending commits in test or live, we can deploy the dev code all the way to live.
+    if (($source_site_environments['live'] == "true") && ($deployable_commits['live'] == 0) && ($deployable_commits['test'] == 0)) {
+      if (!($this->doExec("cd $target_clone_path && git push -f", TRUE) &&
+        $this->deployToEnvironment($target_site_name, "live", $this->deploy_note)
+      )
+      ) {
+        throw new TerminusException("Failed to recreate code for target site environments.");
+      }
+    }
+    // If test is initialized and there are no pending commits in test, we can deploy the dev code all to test.
+    elseif (($source_site_environments['test'] == "true") && ($deployable_commits['test'] == 0)) {
+      if (!($this->doExec("cd $target_clone_path && git push -f", TRUE) &&
+        $this->deployToEnvironment($target_site_name, "test", $this->deploy_note)
+      )
+      ) {
+        throw new TerminusException("Failed to recreate code for target site environments.");
+      }
+    }
+    // There are pending commits in one or more environments.
+    else {
+      // Throws an error if there is a failure.
+      $this->recreateEnvironmentsWithPendingCommits($target_site_name, $deployable_commits);
+    }
+
+  }
+
+  protected function recreateEnvironmentsWithPendingCommits($site_name, array $env_deployable_commits) {
 
     $clone_path = $this->clone_path . DIRECTORY_SEPARATOR . $site_name;
     //FIXME: Is there a programmatic way of determining the name of the command?
-    $deploy_note = "Deployed by 'terminus site clone'";
-
-    // If the source site has not initialized test nor live environments.
-    if (!array_key_exists('live', $env_deployable_commits) && !array_key_exists('test', $env_deployable_commits)) {
-      if (!$this->doExec("cd $clone_path && git push -f", TRUE)) {
-        throw new TerminusException("Failed to recreate code for dev environment.");
-      }
-
-      return TRUE;
-    }
-
-    // If there are no pending commits in test or live
-    if (array_key_exists('live', $env_deployable_commits) && array_key_exists('test', $env_deployable_commits) &&
-      ($env_deployable_commits['live'] == 0) && ($env_deployable_commits['test'] == 0)
-    ) {
-      // we can deploy the dev code all the way to live
-      if (!($this->doExec("cd $clone_path && git push -f", TRUE) &&
-        $this->deployToEnvironment($site_name, "live", $deploy_note)
-      )
-      ) {
-        throw new TerminusException("Failed to recreate code for live environment.");
-      }
-
-      return TRUE;
-    }
 
     // We'll do some merges to create the code for test and/or live. First make a copy of the repo's original state.
     if (!($this->doExec("cd $clone_path && git checkout -b original", TRUE) &&
@@ -389,7 +406,7 @@ class SiteCloneCommand extends TerminusCommand {
       if (!($this->doExec("cd $clone_path && git reset --hard HEAD~$number_commits", TRUE) &&
         $this->doExec("cd $clone_path && git push -f", TRUE) &&
         //deploy to test and live
-        $this->deployToEnvironment($site_name, "live", $deploy_note)
+        $this->deployToEnvironment($site_name, "live", $this->deploy_note)
       )
       ) {
         throw new TerminusException("Failed to recreate code for live environment.");
@@ -420,7 +437,7 @@ class SiteCloneCommand extends TerminusCommand {
         $deploy_to = 'test';
       }
 
-      if (!$this->deployToEnvironment($site_name, $deploy_to, $deploy_note)) {
+      if (!$this->deployToEnvironment($site_name, $deploy_to, $this->deploy_note)) {
         throw new TerminusException("Failed to deploy to {env}.", ['env' => $deploy_to]);
       }
 
@@ -440,7 +457,7 @@ class SiteCloneCommand extends TerminusCommand {
       // No pending commits in Test -- Test is at the same commit as dev
       if (!($this->doExec("cd $clone_path && git push -f", TRUE) &&
         // push commits to dev and test
-        $this->deployToEnvironment($site_name, "test", $deploy_note)
+        $this->deployToEnvironment($site_name, "test", $this->deploy_note)
       )
       ) {
         throw new TerminusException("Failed to recreate code for test environment.");
@@ -448,6 +465,66 @@ class SiteCloneCommand extends TerminusCommand {
     }
 
     return TRUE;
+  }
+
+  protected function recreateEnvironmentContent(\Terminus\Models\Site $source_site, $source_site_environments, \Terminus\Models\Site $target_site, $assoc_args) {
+
+    foreach ($source_site_environments as $environment => $initialized) {
+      if ($initialized != "true") {
+        continue;
+      }
+
+      $this->loadContentFromBackup($source_site, $environment, $target_site->get('name'), $environment, [
+        'database',
+        'files'
+      ]);
+
+      //TODO: Hook transform content
+      // Core transformations
+      $this->transformContentDisableSmtp($target_site, $environment, $assoc_args);
+      $this->transformContentRemoveUserEmails($target_site, $environment, $assoc_args);
+      // User transformations
+      $this->updateObPathologic($target_site, $environment);
+    }
+
+  }
+
+  protected function transformContentDisableSmtp(\Terminus\Models\Site $site, $environment, $assoc_args) {
+    if (isset($assoc_args['no-disable-smtp'])) {
+      return TRUE;
+    }
+
+    $this->log()
+      ->info("Disabling smtp_host in target environment {env}.", ['env' => $environment]);
+
+    // smtp_host is used by smtp module.  lazily not checking if that module exists.
+    // not sure if there is a fallback to localhost smtp if smtp_host is unset or null...
+    $result = $this->doFrameworkCommand($site, $environment, "drush vset smtp_host 'NOEMAIL-FROM-CLONED-SITE.example.com'");
+
+    if ($result['exit_code'] != 0) {
+      $this->log()
+        ->error("Failed to disable smtp_host in target environment {env}.", ['env' => $environment]);
+      return FALSE;
+    }
+  }
+
+  protected function transformContentRemoveUserEmails(\Terminus\Models\Site $site, $environment, $assoc_args) {
+    if (isset($assoc_args['no-remove-emails'])) {
+      return TRUE;
+    }
+
+    $this->log()
+      ->info("Removing user emails in target environment {env}.", ['env' => $environment]);
+
+    // Now there's no way a user could get an auto-generated email.
+    $result = $this->doFrameworkCommand($site, $environment, "drush sqlq \"update users set mail = '' where uid <> 0\"");
+
+    if ($result['exit_code'] != 0) {
+      $this->log()
+        ->error("Failed to remove user emails in target environment {env}.", ['env' => $environment]);
+      return FALSE;
+    }
+
   }
 
   protected function loadContentFromBackup(\Terminus\Models\Site $source_site, $source_env, $target_site_name, $target_env, array $elements = [
@@ -769,6 +846,107 @@ class SiteCloneCommand extends TerminusCommand {
     }
 
     return $code_was_copied;
+  }
+
+  protected function getPantheonDevUrl() {
+    //TODO: implement hook
+    return "pantheon.io";
+  }
+
+  protected function getSiteUrls(\Terminus\Models\Site $site) {
+    $target_site_env_info = $this->getEnvironmentsInfo($site);
+    $target_site_environments = array_column($target_site_env_info, 'initialized', 'id');
+    $target_site_name = $site->get('name');
+    $pantheon_dev_domain = $this->getPantheonDevUrl();
+
+    $env_urls = [];
+    foreach ($target_site_environments as $env => $initialized) {
+      if ($initialized != "true") {
+        continue;
+      }
+      $env_urls[$env] = "http://$env-$target_site_name.$pantheon_dev_domain";
+    }
+
+    $dashbaord_url = sprintf(
+      '%s://%s/sites/%s%s',
+      Config::get('dashboard_protocol'),
+      Config::get('dashboard_host'),
+      $site->id,
+      "#dev"
+    );
+
+    $site_urls = "\n";
+
+    if (isset($env_urls['dev'])) {
+      $site_urls .= $env_urls['dev'] . "\n";
+    }
+    if (isset($env_urls['test'])) {
+      $site_urls .= $env_urls['test'] . "\n";
+    }
+    if (isset($env_urls['live'])) {
+      $site_urls .= $env_urls['live'] . "\n";
+    }
+    $site_urls .= "\nDashboard URL:\n";
+    $site_urls .= $dashbaord_url;
+
+    return $site_urls;
+  }
+
+  protected function fixObSettingsDns($target_site_name) {
+    $clone_path = $this->clone_path . DIRECTORY_SEPARATOR . $target_site_name;
+    $path_to_settings_dns = $clone_path . DIRECTORY_SEPARATOR . "sites" . DIRECTORY_SEPARATOR . "default" . DIRECTORY_SEPARATOR . "settings_dns.php";
+
+    if (!is_file($path_to_settings_dns) || !is_readable($path_to_settings_dns)) {
+      $this->log()
+        ->error("{function}: Doesn't exist or not readable: {file}", [
+          'function' => __FUNCTION__,
+          'file' => $path_to_settings_dns
+        ]);
+      return FALSE;
+    }
+
+    include($path_to_settings_dns);
+    if (!function_exists('openberkeley_dns')) {
+      // There's nothing to do. Source site is using a blank settings_dns.php
+      return TRUE;
+    }
+    $settings_dns = _openberkeley_dns();
+    if (!is_array($settings_dns) || !count($settings_dns)) {
+      // There's nothing to do. Source site is using the default settings_dns.php.
+      return TRUE;
+    }
+    $settings_dns['site_name'] = $target_site_name;
+    $settings_dns['live'] = '';
+    $settings_dns['ssl'] = FALSE;
+    $data = file_get_contents($path_to_settings_dns);
+    $replacement = "*/
+    
+function _openberkeley_dns() {
+  return ";
+    $replacement .= var_export($settings_dns, TRUE);
+    $replacement .= ';
+}';
+
+    $new_code = preg_replace("/\*\/\s+function _openberkeley_dns\(\) {[^}]+}/m", $replacement, $data);
+
+    if (!file_put_contents($path_to_settings_dns, $new_code)) {
+      $this->log()
+        ->error("{function}: Failed to write to {file}", [
+          'function' => __FUNCTION__,
+          'file' => $path_to_settings_dns
+        ]);
+      return FALSE;
+    }
+
+    if (!$this->gitAddCommitPush($this->clone_path . DIRECTORY_SEPARATOR . $target_site_name, "Revised settings_dns() for cloned site.")) {
+      $this->log()
+        ->error("{function}: Failed commit new {file}.", [
+          'function' => __FUNCTION__,
+          'file' => $path_to_settings_dns
+        ]);
+    }
+
+    return TRUE;
   }
 
 }
