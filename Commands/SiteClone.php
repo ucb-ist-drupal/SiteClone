@@ -203,14 +203,13 @@ class SiteCloneCommand extends TerminusCommand {
       throw new TerminusException("Failed to reset {target} reposistory to latest commit.", ['target' => $target_clone_path]);
     }
 
-    //TODO: Hook transform code
-    $this->fixObSettingsDns($target_site_name);
-
     // Deploy to Dev
     if (!$this->doExec("cd $target_clone_path && git push -f", TRUE)) {
       throw new TerminusException("Failed to recreate code for dev environment.");
     }
 
+    //TODO: Hook transform code
+    $this->fixObSettingsDns($target_site_name);
 
     // Copy code from source environments to target environments, preserving pending commits, if they exist.
     $this->recreateEnvironmentCode($source_site, $source_site_environments, $target_site_name, $assoc_args);
@@ -222,7 +221,9 @@ class SiteCloneCommand extends TerminusCommand {
       $this->log()->info("Cleaning up local git working directories.");
       foreach ([$source_clone_path, $target_clone_path] as $path) {
         //FIXME: Windows compatibility...
-        if (!$this->doExec("rm -rf $path")) {
+        if ((!$this->doExec("rm -rf $path" . DIRECTORY_SEPARATOR . '.git') &&
+          $this->doExec("rm -rf $path"))
+        ) {
           $this->log()->info("Failed to remove {path}", ['path' => $path]);
         }
       }
@@ -905,7 +906,15 @@ class SiteCloneCommand extends TerminusCommand {
     }
 
     include($path_to_settings_dns);
+    if (!function_exists('openberkeley_dns')) {
+      // There's nothing to do. Source site is using a blank settings_dns.php
+      return TRUE;
+    }
     $settings_dns = _openberkeley_dns();
+    if (!is_array($settings_dns) || !count($settings_dns)) {
+      // There's nothing to do. Source site is using the default settings_dns.php.
+      return TRUE;
+    }
     $settings_dns['site_name'] = $target_site_name;
     $settings_dns['live'] = '';
     $settings_dns['ssl'] = FALSE;
