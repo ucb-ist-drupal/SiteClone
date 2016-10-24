@@ -254,9 +254,6 @@ class SiteCloneCommand extends TerminusCommand {
       ->outputValue($this->getSiteUrls($source_site), "\nSOURCE SITE URLs (for reference)");
     $this->output()
       ->outputValue($this->getSiteUrls($target_site), "\nTARGET SITE URLs");
-
-
-    $this->callCustomMethods('transformContent', $this, $target_site, 'dev', $assoc_args);
   }
 
   protected function getCustomMethods($methods) {
@@ -521,7 +518,7 @@ class SiteCloneCommand extends TerminusCommand {
       // Core transformations
       //TODO: disable mail
       // User transformations
-      $this->callCustomMethods('transformContent', $this, $target_site, 'dev', $assoc_args);
+      $this->callCustomMethods('transformContent', $this, $target_site, $environment, $assoc_args);
     }
 
   }
