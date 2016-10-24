@@ -26,4 +26,16 @@ trait SiteCloneTrait {
     }
   }
 
+  protected function gitAddCommitPush($clone_path, $commit_message = "") {
+    if (!($this->doExec("cd $clone_path && git add -A", TRUE) &&
+      $this->doExec("cd $clone_path && git commit -m \"$commit_message\"", TRUE) &&
+      $this->doExec("cd $clone_path && git push origin master", TRUE))
+    ) {
+      return FALSE;
+    }
+
+    return TRUE;
+  }
+
+
 }
