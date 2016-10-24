@@ -1,0 +1,15 @@
+{
+  "name": "ucb-ist-drupal/SiteClone",
+  "description": "Create a new site which duplicates the environments, code and content of an existing Pantheon site.",
+  "homepage": "https://github.com/ucb-ist-drupal/site-clone",
+  "license": "MIT",
+  "require": {
+    "php": ">=5.4"
+  },
+  "autoload": {
+    "psr-4": {
+      "SiteClone\\Traits\\": "Traits/",
+      "SiteClone\\Custom\\": "Custom/"
+    }
+  }
+}
