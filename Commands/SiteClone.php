@@ -129,7 +129,7 @@ class SiteCloneCommand extends TerminusCommand {
 
     $source_clone_path = $this->clone_path . DIRECTORY_SEPARATOR . $source_site_name;
     $target_clone_path = $this->clone_path . DIRECTORY_SEPARATOR . $target_site_name;
-/*
+
     // Set target site upstream
     if (array_key_exists('target-site-upstream', $assoc_args)) {
       $target_site_upstream = $assoc_args['target-site-upstream'];
@@ -168,10 +168,10 @@ class SiteCloneCommand extends TerminusCommand {
     ) {
       throw new TerminusException("Failed to create target site.");
     }
-*/
+
     // Target site object for use later.
     $target_site = $this->sites->get($target_site_name);
-/*
+
     // Make sure the new site is in git mode.
     $this->setConnectionMode($target_site, "git");
 
@@ -220,7 +220,7 @@ class SiteCloneCommand extends TerminusCommand {
     if (!$this->doExec("cd $target_clone_path && git push -f", TRUE)) {
       throw new TerminusException("Failed to recreate code for dev environment.");
     }
-*/
+
     //TODO: Hook transform code
     $this->callCustomMethods('transformCode', $this, $target_site, 'dev', $assoc_args);
 
