@@ -7,8 +7,7 @@ use Terminus\Collections\Sites;
 use Terminus\Config;
 use Terminus\Exceptions\TerminusException;
 use Terminus\Utils;
-use SiteClone\Traits\SiteCloneTrait;
-use SiteClone\Custom\SiteCloneCustom;
+use SiteClone\Custom\SiteCloneCustomTrait;
 
 /**
  * Class CloneSiteCommand
@@ -17,10 +16,11 @@ use SiteClone\Custom\SiteCloneCustom;
  */
 class SiteCloneCommand extends TerminusCommand {
 
-  use SiteCloneTrait;
+  use SiteCloneCustomTrait;
 
   private $version = '0.1.0';
   private $compatible_terminus_version = '0.13.3';
+
   protected $sites;
   //TODO: Programmatically determine command name (set in annotations).
   private $deploy_note = "Deployed by 'terminus site clone'";
@@ -43,8 +43,6 @@ class SiteCloneCommand extends TerminusCommand {
     else {
       $this->clone_path = '/tmp';
     }
-    $this->custom_class = new SiteCloneCustom();
-    $this->custom_methods = $this->getCustomMethods(get_class_methods($this->custom_class));
   }
 
   /**
@@ -80,11 +78,8 @@ class SiteCloneCommand extends TerminusCommand {
    * [--git-reset-tag=<tag>]
    * : Tag to which the target site should be reset.
    *
-   * [--no-disable-smtp]
-   * : Do not disable SMTP. Usually it's best to ensure that no mail can be sent from a cloned site.
-   *
-   * [--no-remove-emails]
-   * : Do not remove all user emails. Usually it's best to ensure that no mail can be sent from a cloned site.
+   * [--no-custom=<functionname>]
+   * : Skip custom transformation functions. (Separate multiple funciton names with commas.)
    *
    * [--debug-git]
    * : Do not clean up the git working directories.
@@ -257,7 +252,7 @@ class SiteCloneCommand extends TerminusCommand {
     }
 
     //Apply user code transformations
-    $this->callCustomMethods('transformCode', $this, $target_site, 'dev', $assoc_args);
+    $this->callCustomMethods('transformCode', $target_site, 'dev', $assoc_args);
 
     // Copy code from source environments to target environments, preserving pending commits, if they exist.
     $this->recreateEnvironmentCode($source_site, $source_site_environments, $target_site_name, $assoc_args);
@@ -288,6 +283,7 @@ class SiteCloneCommand extends TerminusCommand {
       ->outputValue($this->getSiteUrls($source_site), "\nSOURCE SITE URLs (for reference)");
     $this->output()
       ->outputValue($this->getSiteUrls($target_site), "\nTARGET SITE URLs");
+
   }
 
   protected function getCustomMethods($methods) {
@@ -306,9 +302,20 @@ class SiteCloneCommand extends TerminusCommand {
     return $custom_methods;
   }
 
-  protected function callCustomMethods($type, \Terminus\Commands\SiteCloneCommand $command, \Terminus\Models\Site $site, $env, $assoc_args) {
-    foreach ($this->custom_methods[$type] as $method) {
-      $this->custom_class->$method($command, $site, $env, $assoc_args);
+  protected function callCustomMethods($type, \Terminus\Models\Site $site, $env, $assoc_args) {
+    $custom_methods = $this->getCustomMethods(get_class_methods($this));
+    $skip_functions = explode(',', $assoc_args['no-custom']);
+
+    if (array_key_exists($type, $custom_methods)) {
+      foreach ($custom_methods[$type] as $method) {
+        if (!in_array($method, $skip_functions)) {
+          $this->$method($site, $env, $assoc_args);
+        }
+        else {
+          $this->log()
+            ->info("Custom function '{func}' skipped as requested.", ['func' => $method]);
+        }
+      }
     }
   }
 
@@ -793,6 +800,24 @@ class SiteCloneCommand extends TerminusCommand {
     }
 
     return TRUE;
+  }
+
+  private function doTerminusDrush(\Terminus\Models\Site $site, $environment, $command) {
+    $environment = $site->environments->get($environment);
+    $result = $environment->sendCommandViaSsh($command);
+
+    return $result;
+  }
+
+  protected function doFrameworkCommand(\Terminus\Models\Site $site, $environment, $command) {
+    $framework = $site->get('framework');
+
+    if ($framework == 'drupal') {
+      return $this->doTerminusDrush($site, $environment, $command);
+    }
+    else {
+      throw new TerminusException("execFrameworkCommnd not implemented for {cms}.", ['cms' => $framework]);
+    }
   }
 
 
