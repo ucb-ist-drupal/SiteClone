@@ -93,7 +93,10 @@ class SiteCloneCommand extends TerminusCommand {
    */
   public function siteClone($args, $assoc_args) {
 
-    //TODO: Make sure there is a 'git' command.
+    // Make sure there is a 'git' command.
+    if (!$this->doExec('git --version')) {
+      throw new TerminusException("'git' was not found in your path. You must remedy this before using this command.");
+    }
 
 
     // Validate source site
