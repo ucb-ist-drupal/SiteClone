@@ -11,9 +11,23 @@ The command `terminus site clone` creates a new site which duplicates the enviro
 ## Don't forget to disable mail on your cloned sites!
 
 ## Use Cases
+Why would we need to clone a site?  
+ 
+### Moving a site between organizations
+Scenario: An agency creates a site outside of our organization.  The preferred way to move the site to the desired organization is to create a new site and import backups 
+of the original site. `terminus site clone` can do this in one command with the advantage of preserving git commits and environment states. 
+
+### 'terminus apply-updates' dry runs
+The normal precautionary procedure for updating a pantheon site is to create multidev environment off of the Test or Live environment, apply code updates and run `drush updb`
+in this multidev envrionment and test the site.  If tests past, push the code and content to the desired environment. 
+   
+In some cases it's useful to clone the site and do an update dry run with out using multidev environments.
 
 ## Details
-This process relies heavily on git.  The code execs git commands.  
+This code endeavors to mirror each environment between the source site and the target (the new copy being created).  If there are pending commits in the live or test 
+environment in the source site, those same commits should be pending in the corresponding environments on the cloned site. The database and files are imported from 
+the most recent backup of the corresponding source environment. If backups are not scheduled for the source site, it's best to backup all environments before creating
+the cloned site. **Feature: create backup first.**
 
 
 ## Possible improvements
