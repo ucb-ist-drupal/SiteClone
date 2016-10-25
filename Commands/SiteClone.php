@@ -19,6 +19,8 @@ class SiteCloneCommand extends TerminusCommand {
 
   use SiteCloneTrait;
 
+  private $version = '0.1.0';
+  private $compatible_terminus_version = '0.13.3';
   protected $sites;
   //TODO: Programmatically determine command name (set in annotations).
   private $deploy_note = "Deployed by 'terminus site clone'";
@@ -48,11 +50,14 @@ class SiteCloneCommand extends TerminusCommand {
   /**
    * Create a new site which duplicates the environments, code and content of an existing Pantheon site.
    *
-   * --source-site=<site>
-   * : (Required) Name of the existing site to be cloned.
+   * [--version]
+   * : Show plugin version and compatible Terminus version.
+   *
+   * [--source-site=<site>]
+   * : Name of the existing site to be cloned. (Required, unless --version is used.)
    *
    * [--target-site=<site>]
-   * : Name of the new site which will be a copy of the source site.
+   * : Name of the new site which will be a copy of the source site. (Required, unless --version or one of --target-site-[prefix|suffix] is used.)
    *
    * [--target-site-prefix=<prefix>]
    * : Target site name will be source site name prefixed with this string.
@@ -84,6 +89,9 @@ class SiteCloneCommand extends TerminusCommand {
    * [--debug-git]
    * : Do not clean up the git working directories.
    *
+   * [--version-plugin]
+   * : Show version information about this plugin
+   *
    * @subcommand clone
    *
    * @param array $args Array of main arguments
@@ -93,34 +101,66 @@ class SiteCloneCommand extends TerminusCommand {
    */
   public function siteClone($args, $assoc_args) {
 
+    if (isset($assoc_args['version'])) {
+      $labels = [
+        'version' => 'Plugin (site clone) Version',
+        'terminus_version' => 'Compatible Terminus Version',
+      ];
+      $config = Config::getAll();
+      $this->output()->outputRecord(
+        [
+          'version' => $this->version,
+          'terminus_version' => $this->compatible_terminus_version,
+        ],
+        $labels
+      );
+
+      return TRUE;
+    }
+
+    // Validate options
+    if (!isset($assoc_args['source-site'])) {
+      throw new TerminusException("The '--source-site' option is requried.");
+    }
+
+    $target_site_name = $this->targetSiteName($assoc_args);
+    if (empty($target_site_name)) {
+      throw new TerminusException("At least one of --target-site-name, --target-site-prefix or --target-site-suffix is required. Also, the target site name must be different than the source site name.");
+    }
+
+    // Make sure target site doesn't exist.
+    try {
+      $existing_target_site = $this->sites->get($target_site_name);
+    }
+    catch (TerminusException $e) {
+      // Good, the site doesn't exist -- do nothing.
+    }
+
+    if (isset($existing_target_site)) {
+      throw new TerminusException("The target site '{target}' already exists.  Please choose another name.", ['target' => $target_site_name]);
+    }
+
+    // Validate source site
+    try {
+      $source_site = $this->sites->get($assoc_args['source-site']);
+    }
+    catch (TerminusException $e) {
+      throw new TerminusException("The source site '{source}' doesn't exist. Please choose an existing site.", ['source' => $assoc_args['source-site']]);
+    }
+
     // Make sure there is a 'git' command.
     if (!$this->doExec('git --version')) {
       throw new TerminusException("'git' was not found in your path. You must remedy this before using this command.");
     }
 
 
-    // Validate source site
-    // TODO: Test with 'site info' and give the user a nicer error.
-    $source_site = $this->sites->get($assoc_args['source-site']);
+    // Done with validation! Get down to business. //
 
     $source_site_environments_info = $this->getEnvironmentsInfo($source_site);
     $source_site_environments = array_column($source_site_environments_info, "initialized", "id");
 
-    // Deploy code to the same envinornment as the source site.
-    //FIXME: Needed?
-    if ($source_site_environments['live'] == "true") {
-      $target_site_environment = 'live';
-    }
-    elseif ($source_site_environments['test'] == "true") {
-      $target_site_environment = 'test';
-    }
-    else {
-      $target_site_environment = 'dev';
-    }
-
-    // Set site names
     $source_site_name = $assoc_args['source-site'];
-    $target_site_name = $this->targetSiteName($assoc_args);
+
 
     $source_clone_path = $this->clone_path . DIRECTORY_SEPARATOR . $source_site_name;
     $target_clone_path = $this->clone_path . DIRECTORY_SEPARATOR . $target_site_name;
@@ -280,6 +320,9 @@ class SiteCloneCommand extends TerminusCommand {
    */
   protected function targetSiteName($assoc_args) {
     if (array_key_exists('target-site', $assoc_args)) {
+      if ($assoc_args['target-site'] == $assoc_args['source-site']) {
+        return NULL;
+      }
       return $assoc_args['target-site'];
     }
 
@@ -292,6 +335,7 @@ class SiteCloneCommand extends TerminusCommand {
     if (array_key_exists('target-site-suffix', $assoc_args)) {
       $target_site .= '-' . $assoc_args['target-site-suffix'];
     }
+
 
     return $target_site;
   }
