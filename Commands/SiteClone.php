@@ -304,7 +304,13 @@ class SiteCloneCommand extends TerminusCommand {
 
   protected function callCustomMethods($type, \Terminus\Models\Site $site, $env, $assoc_args) {
     $custom_methods = $this->getCustomMethods(get_class_methods($this));
-    $skip_functions = explode(',', $assoc_args['no-custom']);
+
+    if (array_key_exists('no-custom', $assoc_args)) {
+      $skip_functions = explode(',', $assoc_args['no-custom']);
+    }
+    else {
+      $skip_functions = [];
+    }
 
     if (array_key_exists($type, $custom_methods)) {
       foreach ($custom_methods[$type] as $method) {
@@ -574,7 +580,7 @@ class SiteCloneCommand extends TerminusCommand {
       // Core transformations
       // TODO: disable mail
       // Apply user content transformations
-      $this->callCustomMethods('transformContent', $this, $target_site, $environment, $assoc_args);
+      $this->callCustomMethods('transformContent', $target_site, $environment, $assoc_args);
     }
 
   }
