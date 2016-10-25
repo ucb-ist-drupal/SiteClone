@@ -41,14 +41,6 @@ class SiteCloneCommand extends TerminusCommand {
     else {
       $this->clone_path = '/tmp';
     }
-/*
-    $customizations_class = __DIR__ . "/../Custom/SiteCloneCustom.php";
-    if (file_exists($customizations_class)) {
-      include_once($customizations_class);
-      $this->custom_class = new SiteCloneCustom();
-      $this->custom_methods = $this->getCustomMethods(get_class_methods($this->custom_class));
-    }
-*/
     $this->custom_class = new SiteCloneCustom();
     $this->custom_methods = $this->getCustomMethods(get_class_methods($this->custom_class));
   }
@@ -221,9 +213,8 @@ class SiteCloneCommand extends TerminusCommand {
       throw new TerminusException("Failed to recreate code for dev environment.");
     }
 
-    //TODO: Hook transform code
+    //Apply user code transformations
     $this->callCustomMethods('transformCode', $this, $target_site, 'dev', $assoc_args);
-
 
     // Copy code from source environments to target environments, preserving pending commits, if they exist.
     $this->recreateEnvironmentCode($source_site, $source_site_environments, $target_site_name, $assoc_args);
@@ -300,6 +291,17 @@ class SiteCloneCommand extends TerminusCommand {
     }
 
     return $target_site;
+  }
+
+  public function gitAddCommitPush($clone_path, $commit_message = "") {
+    if (!($this->doExec("cd $clone_path && git add -A", TRUE) &&
+      $this->doExec("cd $clone_path && git commit -m \"$commit_message\"", TRUE) &&
+      $this->doExec("cd $clone_path && git push origin master", TRUE))
+    ) {
+      return FALSE;
+    }
+
+    return TRUE;
   }
 
   protected function gitCloneSite($site_name, $depth = '') {
@@ -514,10 +516,10 @@ class SiteCloneCommand extends TerminusCommand {
         'files'
       ]);
 
-      // Call user transformations methods
+      // Content transformations.
       // Core transformations
-      //TODO: disable mail
-      // User transformations
+      // TODO: disable mail
+      // Apply user content transformations
       $this->callCustomMethods('transformContent', $this, $target_site, $environment, $assoc_args);
     }
 
