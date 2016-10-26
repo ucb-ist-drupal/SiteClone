@@ -28,6 +28,9 @@ In some cases it's useful to clone the site and do an update dry run with out us
 This code endeavors to mirror each environment between the source site and the target (the new copy being created).  If there are pending commits in the source site's live or test 
 environments, those same commits should be pending in the corresponding environments on the cloned site. 
 
+`--source-site-git-depth` allows the user to shallow-clone the source site repository when it is huge and is unlikely to have diverged from the newly created target site more than N commits ago. 
+This speeds up the `git clone` steps over slower connections, but **using too shallow a depth can cause the code merge to fail**.  
+
 ### Cloning site content (database and files)
 The database and files are imported from the most recent backup of the corresponding source environment. Before proceeding content imports, the code checks that each initialized environment
 on the source site 1) has a backup and 2) the backup is < 48 hours old.  If necessary, fresh backups are created in source site environments.
@@ -39,7 +42,7 @@ on the source site 1) has a backup and 2) the backup is < 48 hours old.  If nece
 Pull requests welcome.
 
 ### Terminus 1.0 support
-When Terminus 1.0 is stable, this plugin will need to be refactored to satisfy new plugin requirements.
+When Terminus 1.0 is stable, this plugin will probably need to be refactored to satisfy new plugin requirements.
 
 ### Windows support
 No testing has been done on Windows. Search the code for "windows".  
@@ -53,8 +56,9 @@ Cloning WordPress sites has not been implemented.
 ### Multidev environments not auto-created
 Presently only the dev, test and live environments are created. Pull requests welcome. 
 
-
-
 ## Thanks
 Greg Anderson: Advice on composer requirements and autoloading. 
 Andrew Taylor: Brainstorming. Pantheon git tags could have been used to sync up environment commits.
+
+## Authors
+Brian Wood, bwood@berkley.edu
