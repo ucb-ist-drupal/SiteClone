@@ -129,15 +129,15 @@ class SiteCloneCommand extends TerminusCommand {
     if (empty($target_site_name)) {
       throw new TerminusException("At least one of --target-site-name, --target-site-prefix or --target-site-suffix is required. Also, the target site name must be different than the source site name.");
     }
-    /*
-        // Make sure target site doesn't exist.
-        try {
-          $existing_target_site = $this->sites->get($target_site_name);
-        }
-        catch (TerminusException $e) {
-          // Good, the site doesn't exist -- do nothing.
-        }
-    */
+
+    // Make sure target site doesn't exist.
+    try {
+      $existing_target_site = $this->sites->get($target_site_name);
+    }
+    catch (TerminusException $e) {
+      // Good, the site doesn't exist -- do nothing.
+    }
+
     if (isset($existing_target_site)) {
       throw new TerminusException("The target site '{target}' already exists.  Please choose another name.", ['target' => $target_site_name]);
     }
