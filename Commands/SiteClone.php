@@ -34,6 +34,10 @@ class SiteCloneCommand extends TerminusCommand {
   public function __construct(array $options = []) {
     $options['require_login'] = TRUE;
     parent::__construct($options);
+
+    date_default_timezone_set('UTC');
+    $this->command_start_time = time();
+
     $this->sites = new Sites();
 
     if (Utils\isWindows()) {
@@ -148,17 +152,27 @@ class SiteCloneCommand extends TerminusCommand {
       throw new TerminusException("'git' was not found in your path. You must remedy this before using this command.");
     }
 
-
-    // Done with validation! Get down to business. //
-
     $source_site_environments_info = $this->getEnvironmentsInfo($source_site);
     $source_site_environments = array_column($source_site_environments_info, "initialized", "id");
 
     $source_site_name = $assoc_args['source-site'];
-
-
     $source_clone_path = $this->clone_path . DIRECTORY_SEPARATOR . $source_site_name;
     $target_clone_path = $this->clone_path . DIRECTORY_SEPARATOR . $target_site_name;
+
+    // Make sure source site has the backups we'll need.
+    //$this->getBackupsInfo($source_site, $source_site_environments);
+    $problem_backups = $this->validateBackups($this->getBackupsInfo($source_site, $source_site_environments));
+    $problem_backups = array_merge_recursive($problem_backups['missing'], $problem_backups['stale']);
+    if (count($problem_backups)) {
+      foreach ($problem_backups as $env => $elements) {
+        foreach ($elements as $element) {
+          $this->log()->info("Site: {source_site}: The backup for Env: {env} Element: {element} is either missing or stale. Creating a new backup.", ['source_site' => $source_site_name, 'env' => $env, 'element' => $element]);
+          $this->createBackup($source_site, $env, $element);
+        }
+      }
+    }
+
+    // Done with validation! Get down to business. //
 
     // Set target site upstream
     if (array_key_exists('target-site-upstream', $assoc_args)) {
@@ -229,7 +243,7 @@ class SiteCloneCommand extends TerminusCommand {
         'target' => $target_site_name
       ]);
 
-    if (!$this->doExec("cd $target_clone_path && git pull ../$source_site_name master --no-squash")) {
+    if (!$this->doExec("cd $target_clone_path && git pull -X theirs ../$source_site_name master --no-squash")) {
       throw new TerminusException("Failed to merge {source} code into {target}", [
         'source' => $source_site_name,
         'target' => $target_site_name
@@ -603,6 +617,16 @@ class SiteCloneCommand extends TerminusCommand {
       ];
       $url = $this->getLatestBackupUrl($source_site, $source_env, $element);
 
+      if (is_null($url)) {
+        $this->log()
+          ->error("Failed to find backup for site: {site} environment: {env} element: {element}", [
+            'site' => $source_site_name,
+            'env' => $source_env,
+            'element' => $element
+          ]);
+        return FALSE;
+      }
+
       $this->log()
         ->info("Importing content: {source_site} {source_env} {element} to {target_site} {target_env} {element}.", $message_context);
 
@@ -629,8 +653,60 @@ class SiteCloneCommand extends TerminusCommand {
 
   protected function getLatestBackupUrl(\Terminus\Models\Site $site, $env, $element) {
     $backups = $this->getBackups($site, $env, $element);
-    $latest_backup = array_shift($backups);
-    return $latest_backup->getUrl();
+    if (count($backups)) {
+      $latest_backup = array_shift($backups);
+      return $latest_backup->getUrl();
+    }
+  }
+
+  /**
+   * @param \Terminus\Models\Site $site
+   * @param array $envs Keys: dev, test, live. Values: 'true' or 'false' (strings) indicating environment initialization state.
+   * @param array $elements
+   * @return array
+   */
+  protected function getBackupsInfo(\Terminus\Models\Site $site, array $envs, array $elements = [
+    'database',
+    'files'
+  ]) {
+    $backups = [];
+
+    foreach ($envs as $env => $initialized) {
+      if ($initialized == 'true') {
+        foreach ($elements as $element) {
+          $backups[$env][$element] = $this->getBackups($site, $env, $element);
+        }
+      }
+    }
+    return $backups;
+  }
+
+  protected function validateBackups(array $backups) {
+
+    $missing = [];
+    $stale = [];
+
+    foreach ($backups as $env => $elements) {
+      foreach ($elements as $element => $data) {
+        if (!count($data)) {
+          $missing[$env][] = $element;
+        }
+        elseif ($this->backupIsStale($data[0])) {
+          $stale[$env][] = $element;
+        }
+      }
+    }
+
+    return ['missing' => $missing, 'stale' => $stale];
+  }
+
+  protected function backupIsStale(\Terminus\Models\Backup $backup, $max_age = 60 * 60 * 48) {
+    $backup_finish_time = $backup->get('finish_time');
+    if ($this->command_start_time - $backup_finish_time > $max_age) {
+      return TRUE;
+    }
+
+    return FALSE;
   }
 
   protected function getBackups(\Terminus\Models\Site $site, $env, $element) {
@@ -639,6 +715,17 @@ class SiteCloneCommand extends TerminusCommand {
     $backups = $env->backups->getFinishedBackups($element);
 
     return $backups;
+  }
+
+  protected function createBackup(\Terminus\Models\Site $site, $env, $element) {
+    $environment = $site->environments->get($env);
+
+    $data = [
+      'element' => $element,
+    ];
+    $workflow = $environment->backups->create($data);
+    $workflow->wait();
+    $this->workflowOutput($workflow);
   }
 
   protected function setConnectionMode(\Terminus\Models\Site $site, $mode, $env = "dev") {
