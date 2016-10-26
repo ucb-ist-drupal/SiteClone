@@ -7,8 +7,7 @@ use Terminus\Collections\Sites;
 use Terminus\Config;
 use Terminus\Exceptions\TerminusException;
 use Terminus\Utils;
-use SiteClone\Traits\SiteCloneTrait;
-use SiteClone\Custom\SiteCloneCustom;
+use SiteClone\Custom\SiteCloneCustomTrait;
 
 /**
  * Class CloneSiteCommand
@@ -17,10 +16,11 @@ use SiteClone\Custom\SiteCloneCustom;
  */
 class SiteCloneCommand extends TerminusCommand {
 
-  use SiteCloneTrait;
+  use SiteCloneCustomTrait;
 
   private $version = '0.1.0';
   private $compatible_terminus_version = '0.13.3';
+
   protected $sites;
   //TODO: Programmatically determine command name (set in annotations).
   private $deploy_note = "Deployed by 'terminus site clone'";
@@ -34,6 +34,10 @@ class SiteCloneCommand extends TerminusCommand {
   public function __construct(array $options = []) {
     $options['require_login'] = TRUE;
     parent::__construct($options);
+
+    date_default_timezone_set('UTC');
+    $this->command_start_time = time();
+
     $this->sites = new Sites();
 
     if (Utils\isWindows()) {
@@ -43,8 +47,6 @@ class SiteCloneCommand extends TerminusCommand {
     else {
       $this->clone_path = '/tmp';
     }
-    $this->custom_class = new SiteCloneCustom();
-    $this->custom_methods = $this->getCustomMethods(get_class_methods($this->custom_class));
   }
 
   /**
@@ -74,17 +76,17 @@ class SiteCloneCommand extends TerminusCommand {
    * [--target-site-git-depth=<number>]
    * : The value to assign '--depth' when git cloning. (Default: No depth. Get all commits.)
    *
+   * [--source-site-backup]
+   * : Create fresh backups in all initialized source site environments before proceeding with clone.
+   *
    * [--source-site-git-depth=<number>]
    * : The value to assign '--depth' when git cloning. (Default: No depth. Get all commits.)
    *
    * [--git-reset-tag=<tag>]
    * : Tag to which the target site should be reset.
    *
-   * [--no-disable-smtp]
-   * : Do not disable SMTP. Usually it's best to ensure that no mail can be sent from a cloned site.
-   *
-   * [--no-remove-emails]
-   * : Do not remove all user emails. Usually it's best to ensure that no mail can be sent from a cloned site.
+   * [--no-custom=<functionname>]
+   * : Skip custom transformation functions. (Separate multiple funciton names with commas.)
    *
    * [--debug-git]
    * : Do not clean up the git working directories.
@@ -153,17 +155,38 @@ class SiteCloneCommand extends TerminusCommand {
       throw new TerminusException("'git' was not found in your path. You must remedy this before using this command.");
     }
 
-
-    // Done with validation! Get down to business. //
-
     $source_site_environments_info = $this->getEnvironmentsInfo($source_site);
     $source_site_environments = array_column($source_site_environments_info, "initialized", "id");
 
     $source_site_name = $assoc_args['source-site'];
-
-
     $source_clone_path = $this->clone_path . DIRECTORY_SEPARATOR . $source_site_name;
     $target_clone_path = $this->clone_path . DIRECTORY_SEPARATOR . $target_site_name;
+
+    // Make sure source site has the backups we'll need.
+    if (isset($assoc_args['source-site-backup'])) {
+      // User asked to refresh backups.
+      $this->backupInitializedEnvironments($source_site, $source_site_environments);
+    }
+    else {
+      // Check existing backups.
+      $problem_backups = $this->validateBackups($this->getBackupsInfo($source_site, $source_site_environments));
+      $problem_backups = array_merge_recursive($problem_backups['missing'], $problem_backups['stale']);
+      if (count($problem_backups)) {
+        foreach ($problem_backups as $env => $elements) {
+          foreach ($elements as $element) {
+            $this->log()
+              ->info("The backup for Site: {source_site} Env: {env} Element: {element} is either missing or stale. Creating a new backup.", [
+                'source_site' => $source_site_name,
+                'env' => $env,
+                'element' => $element
+              ]);
+            $this->createBackup($source_site, $env, $element);
+          }
+        }
+      }
+    }
+
+    // Done with validation! Get down to business. //
 
     // Set target site upstream
     if (array_key_exists('target-site-upstream', $assoc_args)) {
@@ -234,7 +257,7 @@ class SiteCloneCommand extends TerminusCommand {
         'target' => $target_site_name
       ]);
 
-    if (!$this->doExec("cd $target_clone_path && git pull ../$source_site_name master --no-squash")) {
+    if (!$this->doExec("cd $target_clone_path && git pull -X theirs ../$source_site_name master --no-squash")) {
       throw new TerminusException("Failed to merge {source} code into {target}", [
         'source' => $source_site_name,
         'target' => $target_site_name
@@ -257,7 +280,7 @@ class SiteCloneCommand extends TerminusCommand {
     }
 
     //Apply user code transformations
-    $this->callCustomMethods('transformCode', $this, $target_site, 'dev', $assoc_args);
+    $this->callCustomMethods('transformCode', $target_site, 'dev', $assoc_args);
 
     // Copy code from source environments to target environments, preserving pending commits, if they exist.
     $this->recreateEnvironmentCode($source_site, $source_site_environments, $target_site_name, $assoc_args);
@@ -288,6 +311,7 @@ class SiteCloneCommand extends TerminusCommand {
       ->outputValue($this->getSiteUrls($source_site), "\nSOURCE SITE URLs (for reference)");
     $this->output()
       ->outputValue($this->getSiteUrls($target_site), "\nTARGET SITE URLs");
+
   }
 
   protected function getCustomMethods($methods) {
@@ -306,9 +330,26 @@ class SiteCloneCommand extends TerminusCommand {
     return $custom_methods;
   }
 
-  protected function callCustomMethods($type, \Terminus\Commands\SiteCloneCommand $command, \Terminus\Models\Site $site, $env, $assoc_args) {
-    foreach ($this->custom_methods[$type] as $method) {
-      $this->custom_class->$method($command, $site, $env, $assoc_args);
+  protected function callCustomMethods($type, \Terminus\Models\Site $site, $env, $assoc_args) {
+    $custom_methods = $this->getCustomMethods(get_class_methods($this));
+
+    if (array_key_exists('no-custom', $assoc_args)) {
+      $skip_functions = explode(',', $assoc_args['no-custom']);
+    }
+    else {
+      $skip_functions = [];
+    }
+
+    if (array_key_exists($type, $custom_methods)) {
+      foreach ($custom_methods[$type] as $method) {
+        if (!in_array($method, $skip_functions)) {
+          $this->$method($site, $env, $assoc_args);
+        }
+        else {
+          $this->log()
+            ->info("Custom function '{func}' skipped as requested.", ['func' => $method]);
+        }
+      }
     }
   }
 
@@ -421,6 +462,8 @@ class SiteCloneCommand extends TerminusCommand {
   }
 
   protected function getEnvironmentsDeployableCommits(\Terminus\Models\Site $site, $environments) {
+    $deployable_commits = [];
+
     foreach ($environments as $environment => $initialized) {
       // Skip dev and multidev environments.
       if ($environment == "dev" || !in_array($environment, ['test', 'live'])) {
@@ -429,9 +472,6 @@ class SiteCloneCommand extends TerminusCommand {
       if ($initialized == "true") {
         $env = $this->getEnvironment($site, $environment);
         $deployable_commits[$environment] = $env->countDeployableCommits();
-      }
-      else {
-        $deployable_commits[$environment] = 0;
       }
     }
 
@@ -462,31 +502,28 @@ class SiteCloneCommand extends TerminusCommand {
         throw new TerminusException("Failed to recreate code for target site environments.");
       }
     }
-    // There are pending commits in one or more environments.
     else {
-      // Throws an error if there is a failure.
+      // There are pending commits in one or more environments.
       $this->recreateEnvironmentsWithPendingCommits($target_site_name, $deployable_commits);
     }
 
   }
 
-  protected function recreateEnvironmentsWithPendingCommits($site_name, array $env_deployable_commits) {
+  protected function recreateEnvironmentsWithPendingCommits($site_name, array $deployable_commits) {
 
     $clone_path = $this->clone_path . DIRECTORY_SEPARATOR . $site_name;
-    //FIXME: Is there a programmatic way of determining the name of the command?
 
-    // We'll do some merges to create the code for test and/or live. First make a copy of the repo's original state.
+    // First make a copy of the repo's original state.
     if (!($this->doExec("cd $clone_path && git checkout -b original", TRUE) &&
       $this->doExec("cd $clone_path && git checkout master", TRUE))
     ) {
       throw new TerminusException("Failed to create branch with original copy of code.");
     }
 
-
-    // Do Live...
-    if (array_key_exists('live', $env_deployable_commits) && $env_deployable_commits['live'] > 0) {
+    // LIVE: Exists and has deployable commits.
+    if (array_key_exists('live', $deployable_commits) && $deployable_commits['live'] > 0) {
       // git reset HEAD~0 returns exit status of 0
-      $number_commits = $env_deployable_commits['live'] + $env_deployable_commits['test'];
+      $number_commits = $deployable_commits['live'] + $deployable_commits['test'];
       if (!($this->doExec("cd $clone_path && git reset --hard HEAD~$number_commits", TRUE) &&
         $this->doExec("cd $clone_path && git push -f", TRUE) &&
         //deploy to test and live
@@ -500,21 +537,20 @@ class SiteCloneCommand extends TerminusCommand {
       if (!$this->doExec("cd $clone_path && git merge original", TRUE)) {
         throw new TerminusException("Failed to reset dev to original state.");
       }
-
     }
 
-    // ...then do Test...
-    if (array_key_exists('test', $env_deployable_commits) && $env_deployable_commits['test'] > 0) {
+    // TEST: Exists and has deployable commits.
+    if (array_key_exists('test', $deployable_commits) && $deployable_commits['test'] > 0) {
 
-      if (!($this->doExec("cd $clone_path && git reset --hard HEAD~" . $env_deployable_commits['test'], TRUE) &&
+      if (!($this->doExec("cd $clone_path && git reset --hard HEAD~" . $deployable_commits['test'], TRUE) &&
         $this->doExec("cd $clone_path && git push -f", TRUE)
       )
       ) {
         throw new TerminusException("Failed to recreate code for test environment.");
       }
 
-      if ($env_deployable_commits['live'] == 0) {
-        // The live environment hasn't been created yet
+      if (array_key_exists('live', $deployable_commits) && $deployable_commits['live'] == 0) {
+        // Live and Test are at the same commit
         $deploy_to = 'live';
       }
       else {
@@ -530,22 +566,31 @@ class SiteCloneCommand extends TerminusCommand {
         throw new TerminusException("Failed to reset dev to orignal state.");
       }
 
-      // push commits to dev that are pending in test
-      if (!$this->doExec("cd $clone_path && git push -f", TRUE)
+      // DEV: Push commits to dev that are pending in test.
+      if (!$this->doExec("cd $clone_path && git push", TRUE)
       ) {
         throw new TerminusException("Failed to push commit to dev environment.");
       }
 
     }
-    else {
+    // TEST: Exists and does NOT have deployable commits.
+    elseif (array_key_exists('test', $deployable_commits) && $deployable_commits['test'] == 0) {
       // No pending commits in Test -- Test is at the same commit as dev
-      if (!($this->doExec("cd $clone_path && git push -f", TRUE) &&
+      if (!($this->doExec("cd $clone_path && git push", TRUE) &&
         // push commits to dev and test
         $this->deployToEnvironment($site_name, "test", $this->deploy_note)
       )
       ) {
         throw new TerminusException("Failed to recreate code for test environment.");
       }
+    }
+    else {
+      // TEST: Does not exist.
+      // Push to dev.
+      if (!($this->doExec("cd $clone_path && git push", TRUE))) {
+        throw new TerminusException("Failed to recreate code for dev environment.");
+      }
+
     }
 
     return TRUE;
@@ -567,7 +612,7 @@ class SiteCloneCommand extends TerminusCommand {
       // Core transformations
       // TODO: disable mail
       // Apply user content transformations
-      $this->callCustomMethods('transformContent', $this, $target_site, $environment, $assoc_args);
+      $this->callCustomMethods('transformContent', $target_site, $environment, $assoc_args);
     }
 
   }
@@ -589,6 +634,16 @@ class SiteCloneCommand extends TerminusCommand {
         'element' => $element
       ];
       $url = $this->getLatestBackupUrl($source_site, $source_env, $element);
+
+      if (is_null($url)) {
+        $this->log()
+          ->error("Failed to find backup for site: {site} environment: {env} element: {element}", [
+            'site' => $source_site_name,
+            'env' => $source_env,
+            'element' => $element
+          ]);
+        return FALSE;
+      }
 
       $this->log()
         ->info("Importing content: {source_site} {source_env} {element} to {target_site} {target_env} {element}.", $message_context);
@@ -613,11 +668,91 @@ class SiteCloneCommand extends TerminusCommand {
     }
   }
 
+  protected function createBackup(\Terminus\Models\Site $site, $env, $element) {
+    $environment = $site->environments->get($env);
+
+    $data = [
+      'element' => $element,
+    ];
+    $workflow = $environment->backups->create($data);
+    $workflow->wait();
+    $this->workflowOutput($workflow);
+  }
+
+  protected function backupInitializedEnvironments(\Terminus\Models\Site $site, array $site_environments, array $elements = ["all"]) {
+    $site_name = $site->get("name");
+
+    foreach ($site_environments as $env => $initialized) {
+      if ($initialized == 'true') {
+        foreach ($elements as $element) {
+          $this->log()
+            ->info("As requested creating a new backup of Site: {site} Environment: {env} Element: {element}", [
+              'site' => $site_name,
+              'env' => $env,
+              'element' => $element
+            ]);
+          $backups[$env][$element] = $this->createBackup($site, $env, $element);
+        }
+      }
+    }
+  }
+
+  /**
+   * @param \Terminus\Models\Site $site
+   * @param array $site_environments Keys: dev, test, live. Values: 'true' or 'false' (strings) indicating environment initialization state.
+   * @param array $elements
+   * @return array
+   */
+  protected function getBackupsInfo(\Terminus\Models\Site $site, array $site_environments, array $elements = [
+    'database',
+    'files'
+  ]) {
+    $backups = [];
+
+    foreach ($site_environments as $env => $initialized) {
+      if ($initialized == 'true') {
+        foreach ($elements as $element) {
+          $backups[$env][$element] = $this->getBackups($site, $env, $element);
+        }
+      }
+    }
+    return $backups;
+  }
 
   protected function getLatestBackupUrl(\Terminus\Models\Site $site, $env, $element) {
     $backups = $this->getBackups($site, $env, $element);
-    $latest_backup = array_shift($backups);
-    return $latest_backup->getUrl();
+    if (count($backups)) {
+      $latest_backup = array_shift($backups);
+      return $latest_backup->getUrl();
+    }
+  }
+
+  protected function validateBackups(array $backups) {
+
+    $missing = [];
+    $stale = [];
+
+    foreach ($backups as $env => $elements) {
+      foreach ($elements as $element => $data) {
+        if (!count($data)) {
+          $missing[$env][] = $element;
+        }
+        elseif ($this->backupIsStale($data[0])) {
+          $stale[$env][] = $element;
+        }
+      }
+    }
+
+    return ['missing' => $missing, 'stale' => $stale];
+  }
+
+  protected function backupIsStale(\Terminus\Models\Backup $backup, $max_age = 60 * 60 * 48) {
+    $backup_finish_time = $backup->get('finish_time');
+    if ($this->command_start_time - $backup_finish_time > $max_age) {
+      return TRUE;
+    }
+
+    return FALSE;
   }
 
   protected function getBackups(\Terminus\Models\Site $site, $env, $element) {
@@ -793,6 +928,24 @@ class SiteCloneCommand extends TerminusCommand {
     }
 
     return TRUE;
+  }
+
+  private function doTerminusDrush(\Terminus\Models\Site $site, $environment, $command) {
+    $environment = $site->environments->get($environment);
+    $result = $environment->sendCommandViaSsh($command);
+
+    return $result;
+  }
+
+  protected function doFrameworkCommand(\Terminus\Models\Site $site, $environment, $command) {
+    $framework = $site->get('framework');
+
+    if ($framework == 'drupal') {
+      return $this->doTerminusDrush($site, $environment, $command);
+    }
+    else {
+      throw new TerminusException("execFrameworkCommnd not implemented for {cms}.", ['cms' => $framework]);
+    }
   }
 
 
