@@ -309,9 +309,12 @@ class SiteCloneCommand extends TerminusCommand {
 
     $this->output()
       ->outputValue($this->getSiteUrls($source_site), "\nSOURCE SITE URLs (for reference)");
-    $this->output()
-      ->outputValue($this->getSiteUrls($target_site), "\nTARGET SITE URLs");
 
+    $this->output()->outputValue("\nSOURCE SITE URLs (for reference)");
+    $this->output()->outputRecord($this->getSiteUrls($source_site));
+
+    $this->output()->outputValue("\nTARGET SITE URLs");
+    $this->output()->outputRecord($this->getSiteUrls($target_site));
   }
 
   protected function getCustomMethods($methods) {
@@ -980,26 +983,49 @@ class SiteCloneCommand extends TerminusCommand {
     return $code_was_copied;
   }
 
-  protected function getPantheonDevUrl() {
-    //TODO: implement hook
-    return "pantheon.io";
+  /**
+   * If the site has > 1 hostname for the dev environment, return the first domain that doesn't match pantheonsite.io. This hopefully is the organization's custom dev hostname on Pantheon.
+   *
+   * @param \Terminus\Models\Site $site
+   * @return mixed|string
+   */
+  protected function getPantheonDevHostname(\Terminus\Models\Site $site) {
+    $site_name = $site->get('name');
+    $env = $site->environments->get('dev');
+    $data = array_map(
+      function ($hostname) {
+        $info = $hostname->serialize();
+        return $info;
+      },
+      $env->hostnames->all()
+    );
+    $hostnames = array_column($data, 'domain');
+
+    if (count($hostnames) > 1) {
+      $hostnames = array_filter($hostnames, function ($hostname) {
+        if (strpos($hostname, 'pantheonsite.io') === FALSE) {
+          return TRUE;
+        }
+      });
+      $hostname = array_shift($hostnames);
+      $domain = str_replace('dev-' . $site_name . '.', '', $hostname);
+
+      return $domain;
+    }
+    else {
+      return "pantheonsite.io";
+    }
+
   }
 
   protected function getSiteUrls(\Terminus\Models\Site $site) {
     $target_site_env_info = $this->getEnvironmentsInfo($site);
     $target_site_environments = array_column($target_site_env_info, 'initialized', 'id');
     $target_site_name = $site->get('name');
-    $pantheon_dev_domain = $this->getPantheonDevUrl();
+    $pantheon_dev_domain = $this->getPantheonDevHostname($site);
 
     $env_urls = [];
-    foreach ($target_site_environments as $env => $initialized) {
-      if ($initialized != "true") {
-        continue;
-      }
-      $env_urls[$env] = "http://$env-$target_site_name.$pantheon_dev_domain";
-    }
-
-    $dashbaord_url = sprintf(
+    $env_urls['dashboard'] = sprintf(
       '%s://%s/sites/%s%s',
       Config::get('dashboard_protocol'),
       Config::get('dashboard_host'),
@@ -1007,20 +1033,14 @@ class SiteCloneCommand extends TerminusCommand {
       "#dev"
     );
 
-    $site_urls = "\n";
+    // Enforce the order of the environments.
+    foreach (['dev', 'test', 'live'] as $env) {
+      if ($target_site_environments[$env] != "true") {
+        continue;
+      }
+      $env_urls[$env] = "http://$env-$target_site_name.$pantheon_dev_domain";
+    }
 
-    if (isset($env_urls['dev'])) {
-      $site_urls .= $env_urls['dev'] . "\n";
-    }
-    if (isset($env_urls['test'])) {
-      $site_urls .= $env_urls['test'] . "\n";
-    }
-    if (isset($env_urls['live'])) {
-      $site_urls .= $env_urls['live'] . "\n";
-    }
-    $site_urls .= "\nDashboard URL:\n";
-    $site_urls .= $dashbaord_url;
-
-    return $site_urls;
+    return $env_urls;
   }
 }
