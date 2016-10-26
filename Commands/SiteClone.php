@@ -980,16 +980,46 @@ class SiteCloneCommand extends TerminusCommand {
     return $code_was_copied;
   }
 
-  protected function getPantheonDevUrl() {
-    //TODO: implement hook
-    return "pantheon.io";
+  /**
+   * If the site has > 1 hostname for the dev environment, return the first domain that doesn't match pantheonsite.io. This hopefully is the organization's custom dev hostname on Pantheon.
+   *
+   * @param \Terminus\Models\Site $site
+   * @return mixed|string
+   */
+  protected function getPantheonDevHostname(\Terminus\Models\Site $site) {
+    $site_name = $site->get('name');
+    $env = $site->environments->get('dev');
+    $data = array_map(
+      function ($hostname) {
+        $info = $hostname->serialize();
+        return $info;
+      },
+      $env->hostnames->all()
+    );
+    $hostnames = array_column($data, 'domain');
+
+    if (count($hostnames) > 1) {
+      $hostnames = array_filter($hostnames, function ($hostname) {
+        if (strpos($hostname, 'pantheonsite.io') === FALSE) {
+          return TRUE;
+        }
+      });
+      $hostname = array_shift($hostnames);
+      $domain = str_replace('dev-' . $site_name . '.', '', $hostname);
+
+      return $domain;
+    }
+    else {
+      return "pantheonsite.io";
+    }
+
   }
 
   protected function getSiteUrls(\Terminus\Models\Site $site) {
     $target_site_env_info = $this->getEnvironmentsInfo($site);
     $target_site_environments = array_column($target_site_env_info, 'initialized', 'id');
     $target_site_name = $site->get('name');
-    $pantheon_dev_domain = $this->getPantheonDevUrl();
+    $pantheon_dev_domain = $this->getPantheonDevHostname($site);
 
     $env_urls = [];
     foreach ($target_site_environments as $env => $initialized) {
