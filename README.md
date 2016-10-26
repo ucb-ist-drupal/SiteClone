@@ -17,13 +17,15 @@ Why would we need to clone a site?
 Scenario: An agency creates a site outside of our organization.  The preferred way to move the site to the desired organization is to create a new site and import backups 
 of the original site. `terminus site clone` can do this in one command with the advantage of preserving git commits and environment states. 
 
-### 'terminus apply-updates' dry runs
+### 'terminus upstream-updates apply' dry runs
 The normal precautionary procedure for updating a pantheon site is to create multidev environment off of the Test or Live environment, apply code updates and run `drush updb`
 in this multidev envrionment and test the site.  If tests past, push the code and content to the desired environment. 
    
-In some cases it's useful to clone the site and do an update dry run with out using multidev environments.
+In some cases it can be useful to clone the site and do an update dry run without using multidev environments.
 
 ## Details
+
+
 ### Cloning site code
 This code endeavors to mirror each environment between the source site and the target (the new copy being created).  If there are pending commits in the source site's live or test 
 environments, those same commits should be pending in the corresponding environments on the cloned site. 
@@ -52,6 +54,10 @@ Cloning Drupal8 sites has not been implemented.
 
 ### WordPress support
 Cloning WordPress sites has not been implemented.
+
+### Automatically add team members to the cloned site
+`--source-site-team`: Cloned site should have the same team members/roles as the source site.
+`--target-site-team=<roleA:email1,email2;roleB:email1,email2>`: Specify team-members and roles. 
 
 ### Multidev environments not auto-created
 Presently only the dev, test and live environments are created. Pull requests welcome. 
