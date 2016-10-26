@@ -24,10 +24,15 @@ in this multidev envrionment and test the site.  If tests past, push the code an
 In some cases it's useful to clone the site and do an update dry run with out using multidev environments.
 
 ## Details
-This code endeavors to mirror each environment between the source site and the target (the new copy being created).  If there are pending commits in the live or test 
-environment in the source site, those same commits should be pending in the corresponding environments on the cloned site. The database and files are imported from 
-the most recent backup of the corresponding source environment. If backups are not scheduled for the source site, it's best to backup all environments before creating
-the cloned site. **Feature: create backup first.**
+### Cloning site code
+This code endeavors to mirror each environment between the source site and the target (the new copy being created).  If there are pending commits in the source site's live or test 
+environments, those same commits should be pending in the corresponding environments on the cloned site. 
+
+### Cloning site content (database and files)
+The database and files are imported from the most recent backup of the corresponding source environment. Before proceeding content imports, the code checks that each initialized environment
+on the source site 1) has a backup and 2) the backup is < 48 hours old.  If necessary, fresh backups are created in source site environments.
+
+`--source-site-backups` causes backups to be created in all initialized source site environments regardless of existing backups and their ages.
 
 
 ## Possible improvements
