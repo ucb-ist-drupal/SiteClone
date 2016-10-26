@@ -162,19 +162,20 @@ class SiteCloneCommand extends TerminusCommand {
     $source_clone_path = $this->clone_path . DIRECTORY_SEPARATOR . $source_site_name;
     $target_clone_path = $this->clone_path . DIRECTORY_SEPARATOR . $target_site_name;
 
+    // Make sure source site has the backups we'll need.
     if (isset($assoc_args['source-site-backup'])) {
+      // User asked to refresh backups.
       $this->backupInitializedEnvironments($source_site, $source_site_environments);
     }
     else {
-      // Make sure source site has the backups we'll need.
-      //$this->getBackupsInfo($source_site, $source_site_environments);
+      // Check existing backups.
       $problem_backups = $this->validateBackups($this->getBackupsInfo($source_site, $source_site_environments));
       $problem_backups = array_merge_recursive($problem_backups['missing'], $problem_backups['stale']);
       if (count($problem_backups)) {
         foreach ($problem_backups as $env => $elements) {
           foreach ($elements as $element) {
             $this->log()
-              ->info("Site: {source_site}: The backup for Env: {env} Element: {element} is either missing or stale. Creating a new backup.", [
+              ->info("The backup for Site: {source_site} Env: {env} Element: {element} is either missing or stale. Creating a new backup.", [
                 'source_site' => $source_site_name,
                 'env' => $env,
                 'element' => $element
@@ -461,6 +462,8 @@ class SiteCloneCommand extends TerminusCommand {
   }
 
   protected function getEnvironmentsDeployableCommits(\Terminus\Models\Site $site, $environments) {
+    $deployable_commits = [];
+
     foreach ($environments as $environment => $initialized) {
       // Skip dev and multidev environments.
       if ($environment == "dev" || !in_array($environment, ['test', 'live'])) {
@@ -469,9 +472,6 @@ class SiteCloneCommand extends TerminusCommand {
       if ($initialized == "true") {
         $env = $this->getEnvironment($site, $environment);
         $deployable_commits[$environment] = $env->countDeployableCommits();
-      }
-      else {
-        $deployable_commits[$environment] = 0;
       }
     }
 
@@ -502,31 +502,28 @@ class SiteCloneCommand extends TerminusCommand {
         throw new TerminusException("Failed to recreate code for target site environments.");
       }
     }
-    // There are pending commits in one or more environments.
     else {
-      // Throws an error if there is a failure.
+      // There are pending commits in one or more environments.
       $this->recreateEnvironmentsWithPendingCommits($target_site_name, $deployable_commits);
     }
 
   }
 
-  protected function recreateEnvironmentsWithPendingCommits($site_name, array $env_deployable_commits) {
+  protected function recreateEnvironmentsWithPendingCommits($site_name, array $deployable_commits) {
 
     $clone_path = $this->clone_path . DIRECTORY_SEPARATOR . $site_name;
-    //FIXME: Is there a programmatic way of determining the name of the command?
 
-    // We'll do some merges to create the code for test and/or live. First make a copy of the repo's original state.
+    // First make a copy of the repo's original state.
     if (!($this->doExec("cd $clone_path && git checkout -b original", TRUE) &&
       $this->doExec("cd $clone_path && git checkout master", TRUE))
     ) {
       throw new TerminusException("Failed to create branch with original copy of code.");
     }
 
-
-    // Do Live...
-    if (array_key_exists('live', $env_deployable_commits) && $env_deployable_commits['live'] > 0) {
+    // LIVE: Exists and has deployable commits.
+    if (array_key_exists('live', $deployable_commits) && $deployable_commits['live'] > 0) {
       // git reset HEAD~0 returns exit status of 0
-      $number_commits = $env_deployable_commits['live'] + $env_deployable_commits['test'];
+      $number_commits = $deployable_commits['live'] + $deployable_commits['test'];
       if (!($this->doExec("cd $clone_path && git reset --hard HEAD~$number_commits", TRUE) &&
         $this->doExec("cd $clone_path && git push -f", TRUE) &&
         //deploy to test and live
@@ -540,21 +537,20 @@ class SiteCloneCommand extends TerminusCommand {
       if (!$this->doExec("cd $clone_path && git merge original", TRUE)) {
         throw new TerminusException("Failed to reset dev to original state.");
       }
-
     }
 
-    // ...then do Test...
-    if (array_key_exists('test', $env_deployable_commits) && $env_deployable_commits['test'] > 0) {
+    // TEST: Exists and has deployable commits.
+    if (array_key_exists('test', $deployable_commits) && $deployable_commits['test'] > 0) {
 
-      if (!($this->doExec("cd $clone_path && git reset --hard HEAD~" . $env_deployable_commits['test'], TRUE) &&
+      if (!($this->doExec("cd $clone_path && git reset --hard HEAD~" . $deployable_commits['test'], TRUE) &&
         $this->doExec("cd $clone_path && git push -f", TRUE)
       )
       ) {
         throw new TerminusException("Failed to recreate code for test environment.");
       }
 
-      if ($env_deployable_commits['live'] == 0) {
-        // The live environment hasn't been created yet
+      if (array_key_exists('live', $deployable_commits) && $deployable_commits['live'] == 0) {
+        // Live and Test are at the same commit
         $deploy_to = 'live';
       }
       else {
@@ -570,22 +566,31 @@ class SiteCloneCommand extends TerminusCommand {
         throw new TerminusException("Failed to reset dev to orignal state.");
       }
 
-      // push commits to dev that are pending in test
-      if (!$this->doExec("cd $clone_path && git push -f", TRUE)
+      // DEV: Push commits to dev that are pending in test.
+      if (!$this->doExec("cd $clone_path && git push", TRUE)
       ) {
         throw new TerminusException("Failed to push commit to dev environment.");
       }
 
     }
-    else {
+    // TEST: Exists and does NOT have deployable commits.
+    elseif (array_key_exists('test', $deployable_commits) && $deployable_commits['test'] == 0) {
       // No pending commits in Test -- Test is at the same commit as dev
-      if (!($this->doExec("cd $clone_path && git push -f", TRUE) &&
+      if (!($this->doExec("cd $clone_path && git push", TRUE) &&
         // push commits to dev and test
         $this->deployToEnvironment($site_name, "test", $this->deploy_note)
       )
       ) {
         throw new TerminusException("Failed to recreate code for test environment.");
       }
+    }
+    else {
+      // TEST: Does not exist.
+      // Push to dev.
+      if (!($this->doExec("cd $clone_path && git push", TRUE))) {
+        throw new TerminusException("Failed to recreate code for dev environment.");
+      }
+
     }
 
     return TRUE;
