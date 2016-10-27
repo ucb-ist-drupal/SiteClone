@@ -68,7 +68,8 @@ This speeds up the `git clone` steps over slower connections, but **using too sh
 
 ### Cloning site content (database and files)
 The database and files are imported from the most recent backup of the corresponding source environment. Before proceeding with the content imports, the code checks that each initialized environment
-on the source site 1) has database and files backups and 2) that these backups are < 48 hours old.  If necessary, fresh backups are created in source site environments.
+on the source site 1) has database and files backups and 2) that these backups are < 48 hours old.  If necessary, fresh backups are created in source site environments. 
+The content clone function uses the backup URL to avoid downloading/reuploading large files.
 
 `--source-site-backups` causes backups to be created in all initialized source site environments regardless of existing backups and their ages.
 
@@ -119,9 +120,6 @@ Presently only the dev, test and live environments are created. Pull requests we
  
 ### Optionally tag the cloned site
 Tag with "Clone of $source_site_name". This would make it easier to filter for clones on organization dashboards.
-
-### Add a cache clear at the end of content imports for eash environment
-Most clones are fine, but occasionally a D8 clone env needs a cache clear.
 
 ## Thanks
 * Greg Anderson: Advice on composer requirements and autoloading. 
