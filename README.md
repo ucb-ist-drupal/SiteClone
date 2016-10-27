@@ -6,7 +6,7 @@ This command should work with any Pantheon-supported framework (Drupal or WordPr
 
 ## Installation
 1. Copy the plugin code to `~/terminus/plugins` or the location specified by your $TERMINUS_PLUGINS_DIR. 
-2. In your new SiteClone directory run `composer dump-autoload --optimize` to create the autoload.php file required by the command. 
+2. In your new SiteClone directory run `composer dump-autoload` to create the autoload.php file required by the command. 
 3. In your new SiteClone directory run `cp Custom/SiteCloneCustomTrait.php.default Custom/SiteCloneCustomTrait.php`. (The ".php" version of this file is ignored in .gitignore to facilitate custom code added by users.)
 
 ## Use Cases
@@ -24,6 +24,36 @@ In some cases it can be useful to clone the site and do an update dry run withou
 
 ## Don't forget to disable mail on your cloned sites!
 If your site sends email on cron or other hooks, you'll want to save yourself embarrassment by disabling mail on your cloned site. See the custom transformation methods referenced below.
+
+## How to run this
+```
+$ terminus site clone  --source-site=example --target-site-prefix=clone --target-site-suffix=01 
+
+...a healthy amount of info messages...
+
+SOURCE SITE URLs (for reference)
++-----------+------------------------------------------------------------------------------+
+| Key       | Value                                                                        |
++-----------+------------------------------------------------------------------------------+
+| Dashboard | https://dashboard.pantheon.io/sites/337a6c97-XXXX#dev                        |
+| Dev       | http://dev-example.pantheonsite.io                                           |
+| Test      | http://test-example.pantheonsite.io                                          |
+| Live      | http://live-example.pantheonsite.io                                          |
++-----------+------------------------------------------------------------------------------+
+
+TARGET SITE URLs
++-----------+------------------------------------------------------------------------------+
+| Key       | Value                                                                        |
++-----------+------------------------------------------------------------------------------+
+| Dashboard | https://dashboard.pantheon.io/sites/9b25bdd9-XXXXX#dev                       |
+| Dev       | http://dev-clone-example-01.pantheonsite.io                                  |
+| Test      | http://test-clone-example-01.pantheonsite.io                                 |
+| Live      | http://live-clone-example-01.pantheonsite.io                                 |
++-----------+------------------------------------------------------------------------------+
+
+```
+
+Run `terminus help site clone` to see all the options.
 
 ## Details
 
@@ -45,7 +75,7 @@ on the source site 1) has database and files backups and 2) that these backups a
 ## Plugins for this plugin :-)
 Mosts distributions are going to require some idiosyncratic mucking-about to make the cloned site work correctly. The needed customizations fall into two categories which we'll call 
 **"code transformations"** and **"content transformations."** A code transformation modifies code (for example Drupal's settings.php) before the code is pushed to the site environments.
- A content transformation modifies the database that is imported to an environment do do things like disable mail delivery or modify [pathologic paths](https://www.drupal.org/project/pathologic) 
+ A content transformation modifies the database that is imported to an environment to do things like disable mail delivery or modify [pathologic paths](https://www.drupal.org/project/pathologic) 
   
 Users can create custom transformation methods in `Custom/SiteCloneCustomTrait.php`. This file is listed in the project's .gitignore, but could be version controlled in a separate repository and then
 symbolically linked into SiteClone/Custom.
