@@ -1061,30 +1061,13 @@ class SiteCloneCommand extends TerminusCommand {
    * @param $environment
    * @param $command
    * @return mixed
+   * @throws \Terminus\Exceptions\TerminusException
    */
-  private function doTerminusDrush(\Terminus\Models\Site $site, $environment, $command) {
+  protected function doFrameworkCommand(\Terminus\Models\Site $site, $environment, $command) {
     $environment = $site->environments->get($environment);
     $result = $environment->sendCommandViaSsh($command);
 
     return $result;
-  }
-
-  /**
-   * @param \Terminus\Models\Site $site
-   * @param $environment
-   * @param $command
-   * @return mixed
-   * @throws \Terminus\Exceptions\TerminusException
-   */
-  protected function doFrameworkCommand(\Terminus\Models\Site $site, $environment, $command) {
-    $framework = $site->get('framework');
-
-    if ($framework == 'drupal') {
-      return $this->doTerminusDrush($site, $environment, $command);
-    }
-    else {
-      throw new TerminusException("doFrameworkCommand not implemented for {cms}.", ['cms' => $framework]);
-    }
   }
 
   /**
