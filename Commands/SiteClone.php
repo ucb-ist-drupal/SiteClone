@@ -512,7 +512,7 @@ class SiteCloneCommand extends TerminusCommand {
 
     // If live is initialized and there are no pending commits in test or live, we can deploy the dev code all the way to live.
     if (($source_site_environments['live'] == "true") && ($deployable_commits['live'] == 0) && ($deployable_commits['test'] == 0)) {
-      if (!($this->doExec("cd $target_clone_path && git push -f", TRUE) &&
+      if (!($this->doExec("cd $target_clone_path && git push", TRUE) &&
         $this->deployToEnvironment($target_site_name, "live", $this->deploy_note)
       )
       ) {
@@ -521,7 +521,7 @@ class SiteCloneCommand extends TerminusCommand {
     }
     // If test is initialized and there are no pending commits in test, we can deploy the dev code all to test.
     elseif (($source_site_environments['test'] == "true") && ($deployable_commits['test'] == 0)) {
-      if (!($this->doExec("cd $target_clone_path && git push -f", TRUE) &&
+      if (!($this->doExec("cd $target_clone_path && git push", TRUE) &&
         $this->deployToEnvironment($target_site_name, "test", $this->deploy_note)
       )
       ) {
@@ -656,6 +656,9 @@ class SiteCloneCommand extends TerminusCommand {
       // TODO: Disable mail? Since users may have various preferences re strategy, require them to do it in the content transformations, for now.
       // Apply user content transformations
       $this->callCustomMethods('transformContent', $target_site, $environment, $assoc_args);
+
+      // Clear caches
+      $this->clearCache($target_site, $environment);
     }
 
   }
@@ -875,6 +878,18 @@ class SiteCloneCommand extends TerminusCommand {
       $workflow->wait();
       $this->workflowOutput($workflow);
     }
+  }
+
+  /**
+   * @param \Terminus\Models\Site $site
+   * @param $env
+   */
+  protected function clearCache(\Terminus\Models\Site $site, $env) {
+    $this->log()->info("Clearing site cache: Site: {site} Environment: {env}", ['site' => $site->get("name"), 'env' => $env]);
+    $environment = $site->environments->get($env);
+    $workflow    = $environment->clearCache();
+    $workflow->wait();
+    $this->workflowOutput($workflow);
   }
 
   /**
