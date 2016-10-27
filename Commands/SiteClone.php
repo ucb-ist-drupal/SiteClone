@@ -741,6 +741,7 @@ class SiteCloneCommand extends TerminusCommand {
    * @param \Terminus\Models\Site $site
    * @param array $site_environments
    * @param array $elements
+   * @param array $filter_envs
    */
   protected function backupInitializedEnvironments(\Terminus\Models\Site $site, array $site_environments, array $elements = ["all"], array $filter_envs = []) {
     $site_name = $site->get("name");
@@ -803,6 +804,8 @@ class SiteCloneCommand extends TerminusCommand {
 
   /**
    * @param array $backups
+   * @param array $filter_envs
+   * @param array $filter_elements
    * @return array
    */
   protected function validateBackups(array $backups, array $filter_envs = [], array $filter_elements = []) {
@@ -1067,6 +1070,7 @@ class SiteCloneCommand extends TerminusCommand {
 
   /**
    * @param \Terminus\Models\Site $site
+   * @param array $filter_envs
    * @return array
    */
   protected function getSiteUrls(\Terminus\Models\Site $site, $filter_envs = []) {
