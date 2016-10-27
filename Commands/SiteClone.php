@@ -285,9 +285,9 @@ class SiteCloneCommand extends TerminusCommand {
     if (!isset($assoc_args['debug-git'])) {
       $this->log()->info("Cleaning up local git working directories.");
       foreach ([$source_clone_path, $target_clone_path] as $path) {
-        //FIXME: Windows compatibility...
-        if ((!$this->doExec("rm -rf $path" . DIRECTORY_SEPARATOR . '.git') &&
-          $this->doExec("rm -rf $path"))
+        //FIXME: Windows compatibility... Better to do recursive delete with php.
+        if ((!$this->doExec("rm -rf $path" . DIRECTORY_SEPARATOR . '.git')  ||
+          !$this->doExec("rm -rf $path"))
         ) {
           $this->log()->info("Failed to remove {path}", ['path' => $path]);
         }
