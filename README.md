@@ -42,14 +42,26 @@ on the source site 1) has database and files backups and 2) that these backups a
 
 ## Plugins for this plugin :-)
 Mosts distributions are going to require some idiosyncratic mucking-about to make the cloned site work correctly. The needed customizations fall into two categories which we'll call 
-**"code transformations"** and **"content transformations."** A code transformation modifies code (for example Drupal's settings.php) before the code is pushed to the site environments. A content transformation modifies the database that is imported to an environment do do things like disable mail delivery or modify [pathologic paths](https://www.drupal.org/project/pathologic) 
+**"code transformations"** and **"content transformations."** A code transformation modifies code (for example Drupal's settings.php) before the code is pushed to the site environments.
+ A content transformation modifies the database that is imported to an environment do do things like disable mail delivery or modify [pathologic paths](https://www.drupal.org/project/pathologic) 
   
-Users can create custom transformation methods in `Custom/SiteCloneCustomTrait.php`. This file is listed in the project's .gitignore, but could be version controlled in a separate repository -- `git subtree`
-or simple symbolic links might be employed. 
+Users can create custom transformation methods in `Custom/SiteCloneCustomTrait.php`. This file is listed in the project's .gitignore, but could be version controlled in a separate repository and then
+symbolically linked into SiteClone/Custom.
 
 `--no-custom=transformCode_002,transformContent_001` can be used to selectively skip custom transformation methods. 
 
 See the example transformation methods in `Custom/SiteCloneCustomTrait.php.default`.
+
+### Drush and wp commands
+
+If custom transformations use `doFrameworkCommand()` to issue `drush` or `wp` commands, disable SSH strict hostkey checking for Pantheon hosts 
+in ~/.ssh/config. (This way you will avoid interactive confirmations from ssh):
+ 
+```
+# Pantheon containers will trigger strict host checking for "terminus drush" commands
+host *.drush.in
+   StrictHostKeyChecking no
+```
 
 ## Possible improvements
 Pull requests welcome.
