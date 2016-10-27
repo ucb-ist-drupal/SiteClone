@@ -21,6 +21,8 @@ class SiteCloneCommand extends TerminusCommand {
   private $version = '0.1.0';
   private $compatible_terminus_version = '0.13.3';
 
+  private $default_envs = ['dev', 'test', 'live'];
+
   protected $sites;
   //TODO: Would be nice to programmatically determine command name (set in annotations).
   private $deploy_note = "Deployed by 'terminus site clone'";
@@ -157,11 +159,11 @@ class SiteCloneCommand extends TerminusCommand {
     // Make sure source site has the backups we'll need.
     if (isset($assoc_args['source-site-backup'])) {
       // User asked to refresh backups.
-      $this->backupInitializedEnvironments($source_site, $source_site_environments);
+      $this->backupInitializedEnvironments($source_site, $source_site_environments, $this->default_envs);
     }
     else {
       // Check existing backups.
-      $problem_backups = $this->validateBackups($this->getBackupsInfo($source_site, $source_site_environments));
+      $problem_backups = $this->validateBackups($this->getBackupsInfo($source_site, $source_site_environments), $this->default_envs);
       $problem_backups = array_merge_recursive($problem_backups['missing'], $problem_backups['stale']);
       if (count($problem_backups)) {
         foreach ($problem_backups as $env => $elements) {
@@ -300,10 +302,10 @@ class SiteCloneCommand extends TerminusCommand {
     }
 
     $this->output()->outputValue("\nSOURCE SITE URLs (for reference)");
-    $this->output()->outputRecord($this->getSiteUrls($source_site));
+    $this->output()->outputRecord($this->getSiteUrls($source_site, $this->default_envs));
 
     $this->output()->outputValue("\nTARGET SITE URLs");
-    $this->output()->outputRecord($this->getSiteUrls($target_site));
+    $this->output()->outputRecord($this->getSiteUrls($target_site, $this->default_envs));
   }
 
   /**
@@ -639,6 +641,11 @@ class SiteCloneCommand extends TerminusCommand {
         continue;
       }
 
+      //for now skip multidev environments
+      if (!in_array($environment, $this->default_envs)) {
+        continue;
+      }
+
       $this->loadContentFromBackup($source_site, $environment, $target_site->get('name'), $environment, [
         'database',
         'files'
@@ -735,11 +742,14 @@ class SiteCloneCommand extends TerminusCommand {
    * @param array $site_environments
    * @param array $elements
    */
-  protected function backupInitializedEnvironments(\Terminus\Models\Site $site, array $site_environments, array $elements = ["all"]) {
+  protected function backupInitializedEnvironments(\Terminus\Models\Site $site, array $site_environments, array $elements = ["all"], array $filter_envs = []) {
     $site_name = $site->get("name");
 
     foreach ($site_environments as $env => $initialized) {
       if ($initialized == 'true') {
+        if (count($filter_envs) && !in_array($env, $filter_envs)) {
+          continue;
+        }
         foreach ($elements as $element) {
           $this->log()
             ->info("As requested creating a new backup of Site: {site} Environment: {env} Element: {element}", [
@@ -795,13 +805,19 @@ class SiteCloneCommand extends TerminusCommand {
    * @param array $backups
    * @return array
    */
-  protected function validateBackups(array $backups) {
+  protected function validateBackups(array $backups, array $filter_envs = [], array $filter_elements = []) {
 
     $missing = [];
     $stale = [];
 
     foreach ($backups as $env => $elements) {
+      if (count($filter_envs) && !in_array($env, $filter_envs)) {
+        continue;
+      }
       foreach ($elements as $element => $data) {
+        if (count($filter_elements) && !in_array($env, $filter_elements)) {
+          continue;
+        }
         if (!count($data)) {
           $missing[$env][] = $element;
         }
@@ -1053,10 +1069,10 @@ class SiteCloneCommand extends TerminusCommand {
    * @param \Terminus\Models\Site $site
    * @return array
    */
-  protected function getSiteUrls(\Terminus\Models\Site $site) {
-    $target_site_env_info = $this->getEnvironmentsInfo($site);
-    $target_site_environments = array_column($target_site_env_info, 'initialized', 'id');
-    $target_site_name = $site->get('name');
+  protected function getSiteUrls(\Terminus\Models\Site $site, $filter_envs = []) {
+    $site_env_info = $this->getEnvironmentsInfo($site);
+    $site_environments = array_column($site_env_info, 'initialized', 'id');
+    $site_name = $site->get('name');
     $pantheon_dev_domain = $this->getPantheonDevHostname($site);
 
     $env_urls = [];
@@ -1069,11 +1085,11 @@ class SiteCloneCommand extends TerminusCommand {
     );
 
     // Enforce the order of the environments.
-    foreach (['dev', 'test', 'live'] as $env) {
-      if ($target_site_environments[$env] != "true") {
+    foreach ($this->default_envs as $env) {
+      if ($site_environments[$env] != "true") {
         continue;
       }
-      $env_urls[$env] = "http://$env-$target_site_name.$pantheon_dev_domain";
+      $env_urls[$env] = "http://$env-$site_name.$pantheon_dev_domain";
     }
 
     return $env_urls;
