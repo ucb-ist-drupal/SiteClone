@@ -1,7 +1,8 @@
 # Terminus Plugin: site clone
 
 ## Summary
-The command `terminus site clone` creates a new site which duplicates the environments, code (including git commits) and content of an existing Pantheon site.
+The command `terminus site clone` creates a new site which duplicates the environments, code (including git commits) and content of an existing Pantheon site. 
+This command should work with any Pantheon-supported framework (Drupal or WordPress). 
 
 ## Installation
 1. Copy the plugin code to `~/terminus/plugins` or the location specified by your $TERMINUS_PLUGINS_DIR. 
@@ -61,9 +62,6 @@ Tests should be added when/if this plugin is ported to Terminus 1.0.
 
 ### Windows support
 No testing has been done on Windows. Search the code for "windows".  
-
-### Drupal8
-Cloning Drupal8 sites has not been implemented, but it should be low-hanging fruit.
 
 ### WordPress support
 Cloning WordPress sites has not been implemented.
