@@ -31,6 +31,8 @@ If your site sends email on cron or other hooks, you'll want to save yourself em
 This code endeavors to mirror each environment between the source site and the target (the new copy being created).  If there are pending commits in the source site's live or test 
 environments, those same commits should be pending in the corresponding environments on the cloned site. 
 
+The code uses your local `git` to clone the source and target sites to your /tmp directory.  (See note below on Windows support.)
+
 `--source-site-git-depth` allows the user to shallow-clone the source site repository when it is huge and is unlikely to have diverged from the newly created target site more than N commits ago. 
 This speeds up the `git clone` steps over slower connections, but **using too shallow a depth can cause the code merge to fail**.  
 
@@ -72,8 +74,8 @@ When Terminus 1.0 is stable, this plugin will probably need to be refactored to 
 ### Tests!
 Tests should be added when/if this plugin is ported to Terminus 1.0.
 
-### Windows support
-No testing has been done on Windows. Search the code for "windows".  
+### Add Windows support
+A bit more work is needed to support Windows. Search the code for "windows".  
 
 ### WordPress support
 Cloning WordPress sites has not been implemented.
@@ -88,9 +90,12 @@ Presently only the dev, test and live environments are created. Pull requests we
 ### Optionally tag the cloned site
 Tag with "Clone of $source_site_name". This would make it easier to filter for clones on organization dashboards.
 
+### Add a cache clear at the end of content imports for eash environment
+Most clones are fine, but occasionally a D8 clone env needs a cache clear.
+
 ## Thanks
 * Greg Anderson: Advice on composer requirements and autoloading. 
 * Andrew Taylor: Brainstorming. Pantheon git tags could have been used to sync up environment commits.
 
 ## Authors
-* Brian Wood, bwood@berkley.edu
+* Brian Wood, bwood@berkeley.edu

@@ -81,8 +81,8 @@ class SiteCloneCommand extends TerminusCommand {
    * [--source-site-git-depth=<number>]
    * : The value to assign '--depth' when git cloning. (Default: No depth. Get all commits.)
    *
-   * [--no-custom=<transformCode_002,transformContent_003>]
-   * : Skip custom transformation functions. (Separate multiple function names with commas.)
+   * [--no-custom=<functionname>]
+   * : Skip custom transformation functions. (Separate multiple function names with commas: --no-custom=transformCode_002,transformContent_001)
    *
    * [--debug-git]
    * : Do not clean up the git working directories.
@@ -298,9 +298,6 @@ class SiteCloneCommand extends TerminusCommand {
           'target' => $target_clone_path
         ]);
     }
-
-    $this->output()
-      ->outputValue($this->getSiteUrls($source_site), "\nSOURCE SITE URLs (for reference)");
 
     $this->output()->outputValue("\nSOURCE SITE URLs (for reference)");
     $this->output()->outputRecord($this->getSiteUrls($source_site));
@@ -946,54 +943,6 @@ class SiteCloneCommand extends TerminusCommand {
 
   /**
    * @param $cms
-   * @param $version
-   * @param $source_site_name
-   * @param $target_site_name
-   * @return bool
-   * @throws \Terminus\Exceptions\TerminusException
-   */
-  protected function copyContribCode($cms, $version, $source_site_name, $target_site_name) {
-
-    $code_was_copied = FALSE;
-    $parts = explode('.', $version);
-    $major_version = array_shift($parts);
-
-    if (($cms == "drupal") && ($major_version < 8) && ($major_version > 4)) {
-      $source_contrib_dir = $this->clone_path . DIRECTORY_SEPARATOR . $source_site_name . DIRECTORY_SEPARATOR . "sites" . DIRECTORY_SEPARATOR . "all";
-      $target_contrib_dir = $this->clone_path . DIRECTORY_SEPARATOR . $target_site_name . DIRECTORY_SEPARATOR . "sites" . DIRECTORY_SEPARATOR . "all";
-
-      if ($handle = opendir($source_contrib_dir)) {
-
-        while (FALSE !== ($item = readdir($handle))) {
-          if (($item == '.') || ($item == '..')) {
-            continue;
-          }
-
-          if (is_dir($source_contrib_dir . DIRECTORY_SEPARATOR . $item)) {
-            $result = $this->copyDirectoryRecursively($source_contrib_dir . DIRECTORY_SEPARATOR . $item, $target_contrib_dir . DIRECTORY_SEPARATOR . $item);
-
-            // If $code_was_copied becomes TRUE don't set it back to FALSE.
-            if (!$code_was_copied && $result) {
-              $code_was_copied = TRUE;
-            }
-          }
-        }
-
-        closedir($handle);
-      }
-    }
-    else {
-      throw new TerminusException("copyContribCode not implemented for {cms} version {version}.", [
-        'cms' => $cms,
-        'version' => $version
-      ]);
-    }
-
-    return $code_was_copied;
-  }
-
-  /**
-   * @param $cms
    * @param $source_site
    * @return bool
    * @throws \Terminus\Exceptions\TerminusException
@@ -1062,41 +1011,6 @@ class SiteCloneCommand extends TerminusCommand {
     $result = $environment->sendCommandViaSsh($command);
 
     return $result;
-  }
-
-  /**
-   * @param $source
-   * @param $dest
-   * @return bool
-   */
-  protected function copyDirectoryRecursively($source, $dest) {
-
-    $code_was_copied = FALSE;
-
-    foreach (
-      $iterator = new \RecursiveIteratorIterator(
-        new \RecursiveDirectoryIterator($source, \RecursiveDirectoryIterator::SKIP_DOTS),
-        \RecursiveIteratorIterator::SELF_FIRST) as $item
-    ) {
-      if ($item->isDir()) {
-        $subpath = $iterator->getSubPathName();
-        $target_dir = $dest . DIRECTORY_SEPARATOR . $subpath;
-        if (!is_dir($target_dir)) {
-          mkdir($target_dir);
-          $code_was_copied = TRUE;
-        }
-      }
-      else {
-        $subpath = $iterator->getSubPathName();
-        $target_file = $dest . DIRECTORY_SEPARATOR . $subpath;
-        if (!is_file($target_file)) {
-          copy($item, $target_file);
-          $code_was_copied = TRUE;
-        }
-      }
-    }
-
-    return $code_was_copied;
   }
 
   /**
