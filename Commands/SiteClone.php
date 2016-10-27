@@ -67,10 +67,10 @@ class SiteCloneCommand extends TerminusCommand {
    * : Target site name will be source site name suffixed with this string.
    *
    * [--target-site-org=<organization>]
-   * : The organization in which to create the target site. Defaults to source site organization.
+   * : The organization (name or ID) in which to create the target site. Defaults to source site organization.
    *
    * [--target-site-upstream=<upstream>]
-   * : The upstream repository (ID or name) to use for the target site. Defaults to source site upstream.
+   * : The upstream repository (name or ID) to use for the target site. Defaults to source site upstream.
    *
    * [--target-site-git-depth=<number>]
    * : The value to assign '--depth' when git cloning. (Default: No depth. Get all commits.)
@@ -81,17 +81,11 @@ class SiteCloneCommand extends TerminusCommand {
    * [--source-site-git-depth=<number>]
    * : The value to assign '--depth' when git cloning. (Default: No depth. Get all commits.)
    *
-   * [--git-reset-tag=<tag>]
-   * : Tag to which the target site should be reset.
-   *
-   * [--no-custom=<functionname>]
+   * [--no-custom=<transformCode_002,transformContent_003>]
    * : Skip custom transformation functions. (Separate multiple function names with commas.)
    *
    * [--debug-git]
    * : Do not clean up the git working directories.
-   *
-   * [--version-plugin]
-   * : Show version information about this plugin
    *
    * @subcommand clone
    *
