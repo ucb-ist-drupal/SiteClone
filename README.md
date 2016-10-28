@@ -105,6 +105,10 @@ When Terminus 1.0 is stable, this plugin will probably need to be refactored to 
 ### Tests!
 Tests should be added when/if this plugin is ported to Terminus 1.0.
 
+### Summarize errors at end of command
+Sometimes (mainly in customTransformation menthods) we use `$this->log()-error("foo")` but we don't abort the command.  It would be nice if we could summarize any existing 
+errors for the user at just before we display the urls.   
+
 ### Add Windows support
 A bit more work is needed to support Windows. Search the code for "windows".  
 
