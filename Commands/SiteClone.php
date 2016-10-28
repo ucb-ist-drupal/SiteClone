@@ -18,7 +18,7 @@ class SiteCloneCommand extends TerminusCommand {
 
   use SiteCloneCustomTrait;
 
-  private $version = '0.1.0';
+  private $version = '0.1.1';
   private $compatible_terminus_version = '0.13.3';
 
   private $default_envs = ['dev', 'test', 'live'];
