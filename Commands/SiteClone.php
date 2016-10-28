@@ -415,10 +415,7 @@ class SiteCloneCommand extends TerminusCommand {
         ->info("Found {clone_path}. Attempting 'git pull'.", ['clone_path' => $clone_path]);
 
       if (!$this->doExec("cd $clone_path && git pull")) {
-        $this->log->error("Failed to git pull {site}", ['site' => $site_name]);
-        // remove it so we can attempt 'git clone'
-        // FIXME: Windows.
-        $this->doExec("rm -rf $clone_path");
+        throw new TerminusException("Failed to git pull {site} to {path}. (You might want to investigate/clean up that path.)", ['site' => $site_name, 'path' => $clone_path]);
       }
       else {
         return TRUE;
@@ -433,11 +430,10 @@ class SiteCloneCommand extends TerminusCommand {
     $git_command = $this->getConnectionInfo($site_name, "dev", "git_command");
     $git_command = preg_replace("/ $site_name\$/", " " . $this->clone_path . DIRECTORY_SEPARATOR . $site_name, $git_command);
     $this->log()
-      ->info("Git cloning$depth_option {site}...", ["site" => $site_name]);
+      ->info("Git cloning{depth_option} {site}...", ["site" => $site_name, "depth_option" => $depth_option]);
 
     if (!$this->doExec($git_command . $depth_option)) {
-      $this->log()->error("Failed to clone {site}", ['site' => $site_name]);
-      return FALSE;
+      throw new TerminusException("Failed to git clone {site} to {path}. (You might want to investigate/clean up that path.)", ['site' => $site_name, 'path' => $clone_path]);
     }
 
     return TRUE;
