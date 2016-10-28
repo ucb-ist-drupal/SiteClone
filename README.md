@@ -6,7 +6,7 @@ This command should work with any Pantheon-supported framework (Drupal or WordPr
 
 ## Installation
 ### Install the tarball
-Beginning with release 0.1.1 it should work to simply uncompress the tarball linked on the release page in `~/terminus/plugins` or the location 
+Beginning with release 0.1.1 it should work to simply uncompress the tarball linked on the [release page](https://github.com/ucb-ist-drupal/SiteClone/releases) in `~/terminus/plugins` or the location 
 specified by your $TERMINUS_PLUGINS_DIR.  You should end up with this folder structure: `~/terminus/plugins/SiteClone`
 
 ### Install using git
@@ -64,6 +64,9 @@ TARGET SITE URLs
 ```
 
 Run `terminus help site clone` to see all the options.
+
+## Issues and improvements
+Post 'em in the [project issue queue](https://github.com/ucb-ist-drupal/SiteClone/issues).
 
 ## Details
 
