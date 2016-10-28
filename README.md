@@ -5,9 +5,19 @@ The command `terminus site clone` creates a new site which duplicates the enviro
 This command should work with any Pantheon-supported framework (Drupal or WordPress). 
 
 ## Installation
+### Install the tarball
+Beginning with release 0.1.1 it should work to simply uncompress the tarball linked on the release page in `~/terminus/plugins` or the location 
+specified by your $TERMINUS_PLUGINS_DIR.  You should end up with this folder structure: `~/terminus/plugins/SiteClone`
+
+### Install using git
 1. Copy the plugin code to `~/terminus/plugins` or the location specified by your $TERMINUS_PLUGINS_DIR. 
 2. In your new SiteClone directory run `composer dump-autoload` to create the autoload.php file required by the command. 
 3. In your new SiteClone directory run `cp Custom/SiteCloneCustomTrait.php.default Custom/SiteCloneCustomTrait.php`. (The ".php" version of this file is ignored in .gitignore to facilitate custom code added by users.)
+
+### Verify that the command is working
+`terminus help site clone` should display the help text.
+
+`terminus site clone --version` should display the version information.
 
 ## Use Cases
 Why would we need to clone a site?  
