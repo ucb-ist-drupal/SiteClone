@@ -26,7 +26,7 @@ Why would we need to clone a site?
 Scenario: An agency creates a site outside of our organization.  The preferred way to move the site to the desired organization is to create a new site and import backups 
 of the original site. `terminus site clone` can do this in one command with the advantage of preserving git commits and environment states. 
 
-### 'terminus upstream-updates apply' dry runs
+### 'terminus site upstream-updates apply' dry runs
 The normal precautionary procedure for updating a pantheon site is to create multidev environment off of the Test or Live environment, apply code updates and run `drush updb`
 in this multidev envrionment and test the site.  If tests past, push the code and content to the desired environment. 
    
@@ -71,7 +71,9 @@ Run `terminus help site clone` to see all the options.
 This code endeavors to mirror each environment between the source site and the target (the new copy being created).  If there are pending commits in the source site's live or test 
 environments, those same commits should be pending in the corresponding environments on the cloned site. 
 
-The code uses your local `git` to clone the source and target sites to your /tmp directory.  (See note below on Windows support.)
+The code uses your local `git` to clone the source and target sites to your /tmp directory. (See *Possible Improvements* below.) The target site repository is reset to 
+the latest commit of the source site and source site code is merged into the target repository. **An important assumption is that the target site uses the same upstream repository
+as the source site.** Only use `--target-site-upstream=<upstream>` if you really know what you're doing.
 
 `--source-site-git-depth` allows the user to shallow-clone the source site repository when it is huge and is unlikely to have diverged from the newly created target site more than N commits ago. 
 This speeds up the `git clone` steps over slower connections, but **using too shallow a depth can cause the code merge to fail**.  
@@ -114,6 +116,9 @@ When Terminus 1.0 is stable, this plugin will probably need to be refactored to 
 
 ### Tests!
 Tests should be added when/if this plugin is ported to Terminus 1.0.
+
+### Probably don't need to clone the source site locally
+As it turns out, we could probably merge from the remote source site repository.  This could speed things up.
 
 ### Summarize errors at end of command
 Sometimes (mainly in customTransformation menthods) we use `$this->log()-error("foo")` but we don't abort the command.  It would be nice if we could summarize any existing 
