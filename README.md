@@ -111,6 +111,55 @@ host *.drush.in
    StrictHostKeyChecking no
 ```
 
+## FAQ
+### Q: Why do I sometimes see Pantheon commit warnings like the following?
+```
+remote: PANTHEON WARNING:
+remote:
+remote: Commit: A commit between 5b8c22fccc6a6167eac965f0391422a06a7e3ebf and e5e3c1e32cd30c82923399e511fc45b16c6a715b
+remote: Contains changes to CHANGELOG.txt which is a part of Drupal core.
+```
+**A: Normally you can disregard these commit warnings.**
+The 'site clone' process sometimes needs to reset a local git repository to an older commit and use `git push -f`. Doing this can trigger these warnings since our process doesn't conform to the normal Pantheon workflow.
+
+### Q: I notice that when content is cloned to the target site it often loads the enviornments out of order.
+E.g. I see it do 'test' then 'live' then 'dev.'
+
+**A: Importing content to environments can be done in any order.**
+This is not the same as deploying code to environments, which should be done the dev->test->live order.
+
+### Q: Should I worry if I see cURL errors like these?
+```
+[2016-11-11 01:32:50] [info] Importing content: american-cultures dev files to upgrade-testing-0110-american-cultures-kl-01 dev files.
+    source_site: 'american-cultures'
+    source_env: 'dev'
+    target_site: 'upgrade-testing-0110-american-cultures-kl-01'
+    target_env: 'dev'
+    element: 'files'
+............[2016-11-11 01:33:49] [error] cURL error 7: Failed to connect to terminus.pantheon.io port 443: Operation timed out (see http://curl.haxx.se/libcurl/c/libcurl-errors.html)
+```
+**A: Yes**
+This indicates that the files were not completely loaded into the dev environment. This could be the result of a lapse of connectivity for the computer from which the command was run. Or it might be a temporary problem with Pantheon.
+It's alway a good idea to search your output for "error." It would be great if the command could summarize errors in a future version.
+
+### Q: What should I do about the error "File import exceeds the maximum allowed size of 1GB"?
+```
+[2016-11-14 18:24:53] [info] Importing content: american-cultures test files to upgrade-testing-0110-american-cultures-kl-02 test files.
+    source_site: 'american-cultures'
+    source_env: 'test'
+    target_site: 'upgrade-testing-0110-american-cultures-kl-02'
+    target_env: 'test'
+    element: 'files'
+....................
+[2016-11-14 18:26:08] [error] File import exceeds the maximum allowed size of 1GB
+```
+**A: The files on the target site will be incomplete.**
+If no other issues arise, the clone will work, but the incomplete files will probably result in broken images or node attachments...what have you.
+
+No good workaround for this is known at this point.
+
+It's interesting that > 1GB file were added to the source site in the first place.
+
 ## Possible improvements
 Pull requests welcome.
 
