@@ -6,7 +6,7 @@ This command should work with any Pantheon-supported framework (Drupal or WordPr
 
 ## Installation
 ### Install the tarball
-Beginning with release 0.1.1 it should work to simply uncompress the tarball linked on the [release page](https://github.com/ucb-ist-drupal/SiteClone/releases) in `~/terminus/plugins` or the location 
+Beginning with release 0.1.1 it should work to simply uncompress the tarball linked on the release page in `~/terminus/plugins` or the location 
 specified by your $TERMINUS_PLUGINS_DIR.  You should end up with this folder structure: `~/terminus/plugins/SiteClone`
 
 ### Install using git
@@ -26,7 +26,7 @@ Why would we need to clone a site?
 Scenario: An agency creates a site outside of our organization.  The preferred way to move the site to the desired organization is to create a new site and import backups 
 of the original site. `terminus site clone` can do this in one command with the advantage of preserving git commits and environment states. 
 
-### 'terminus site upstream-updates apply' dry runs
+### 'terminus upstream-updates apply' dry runs
 The normal precautionary procedure for updating a pantheon site is to create multidev environment off of the Test or Live environment, apply code updates and run `drush updb`
 in this multidev envrionment and test the site.  If tests past, push the code and content to the desired environment. 
    
@@ -65,18 +65,13 @@ TARGET SITE URLs
 
 Run `terminus help site clone` to see all the options.
 
-## Issues and improvements
-Post 'em in the [project issue queue](https://github.com/ucb-ist-drupal/SiteClone/issues).
-
 ## Details
 
 ### Cloning site code
 This code endeavors to mirror each environment between the source site and the target (the new copy being created).  If there are pending commits in the source site's live or test 
 environments, those same commits should be pending in the corresponding environments on the cloned site. 
 
-The code uses your local `git` to clone the source and target sites to your /tmp directory. (See *Possible Improvements* below.) The target site repository is reset to 
-the latest commit of the source site and source site code is merged into the target repository. **An important assumption is that the target site uses the same upstream repository
-as the source site.** Only use `--target-site-upstream=<upstream>` if you really know what you're doing.
+The code uses your local `git` to clone the source and target sites to your /tmp directory.  (See note below on Windows support.)
 
 `--source-site-git-depth` allows the user to shallow-clone the source site repository when it is huge and is unlikely to have diverged from the newly created target site more than N commits ago. 
 This speeds up the `git clone` steps over slower connections, but **using too shallow a depth can cause the code merge to fail**.  
@@ -111,6 +106,54 @@ host *.drush.in
    StrictHostKeyChecking no
 ```
 
+## FAQ
+### Q: Why do I sometimes see Pantheon commit warnings like the following?
+```
+remote: PANTHEON WARNING:
+remote:
+remote: Commit: A commit between 5b8c22fccc6a6167eac965f0391422a06a7e3ebf and e5e3c1e32cd30c82923399e511fc45b16c6a715b
+remote: Contains changes to CHANGELOG.txt which is a part of Drupal core.
+```
+**A: Normally you can disregard these commit warnings.**
+The 'site clone' process sometimes needs to reset a local git repository to an older commit and use `git push -f`. Doing this can trigger these warnings since our process doesn't conform to the normal Pantheon workflow.
+
+### Q: I notice that when content is cloned to the target site it often loads the enviornments out of order.
+E.g. I see it do 'test' then 'live' then 'dev.'
+
+**A: Importing content to environments can be done in any order.**
+This is not the same as deploying code to environments, which should be done the dev->test->live order.
+
+### Q: Should I worry if I see cURL errors like these?
+```
+[2016-11-11 01:32:50] [info] Importing content: american-cultures dev files to upgrade-testing-0110-american-cultures-kl-01 dev files.
+    source_site: 'american-cultures'
+    source_env: 'dev'
+    target_site: 'upgrade-testing-0110-american-cultures-kl-01'
+    target_env: 'dev'
+    element: 'files'
+............[2016-11-11 01:33:49] [error] cURL error 7: Failed to connect to terminus.pantheon.io port 443: Operation timed out (see http://curl.haxx.se/libcurl/c/libcurl-errors.html)
+```
+**A: Yes**
+This indicates that the files were not completely loaded into the dev environment. This could be the result of a lapse of connectivity for the computer from which the command was run. Or it might be a temporary problem with Pantheon.
+It's alway a good idea to search your output for "error." It would be great if the command could summarize errors in a future version.
+
+### Q: What should I do about the error "File import exceeds the maximum allowed size of 1GB"?
+```
+[2016-11-14 18:24:53] [info] Importing content: american-cultures test files to upgrade-testing-0110-american-cultures-kl-02 test files.
+    source_site: 'american-cultures'
+    source_env: 'test'
+    target_site: 'upgrade-testing-0110-american-cultures-kl-02'
+    target_env: 'test'
+    element: 'files'
+....................
+[2016-11-14 18:26:08] [error] File import exceeds the maximum allowed size of 1GB
+```
+**A: The files on the target site will be incomplete.**
+If no other issues arise, the clone will work, but the incomplete files will probably result in broken images or node attachments...what have you.
+
+No good workaround for this is known at this point.
+
+It's interesting that > 1GB file were added to the source site in the first place.
 ## Possible improvements
 Pull requests welcome.
 
@@ -119,9 +162,6 @@ When Terminus 1.0 is stable, this plugin will probably need to be refactored to 
 
 ### Tests!
 Tests should be added when/if this plugin is ported to Terminus 1.0.
-
-### Probably don't need to clone the source site locally
-As it turns out, we could probably merge from the remote source site repository.  This could speed things up.
 
 ### Summarize errors at end of command
 Sometimes (mainly in customTransformation menthods) we use `$this->log()-error("foo")` but we don't abort the command.  It would be nice if we could summarize any existing 
