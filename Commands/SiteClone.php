@@ -18,8 +18,10 @@ class SiteCloneCommand extends TerminusCommand {
 
   use SiteCloneCustomTrait;
 
-  private $version = '0.1.0';
+  private $version = '0.1.1';
   private $compatible_terminus_version = '0.13.3';
+
+  private $default_envs = ['dev', 'test', 'live'];
 
   protected $sites;
   //TODO: Would be nice to programmatically determine command name (set in annotations).
@@ -157,11 +159,11 @@ class SiteCloneCommand extends TerminusCommand {
     // Make sure source site has the backups we'll need.
     if (isset($assoc_args['source-site-backup'])) {
       // User asked to refresh backups.
-      $this->backupInitializedEnvironments($source_site, $source_site_environments);
+      $this->backupInitializedEnvironments($source_site, $source_site_environments, $this->default_envs);
     }
     else {
       // Check existing backups.
-      $problem_backups = $this->validateBackups($this->getBackupsInfo($source_site, $source_site_environments));
+      $problem_backups = $this->validateBackups($this->getBackupsInfo($source_site, $source_site_environments), $this->default_envs);
       $problem_backups = array_merge_recursive($problem_backups['missing'], $problem_backups['stale']);
       if (count($problem_backups)) {
         foreach ($problem_backups as $env => $elements) {
@@ -283,9 +285,9 @@ class SiteCloneCommand extends TerminusCommand {
     if (!isset($assoc_args['debug-git'])) {
       $this->log()->info("Cleaning up local git working directories.");
       foreach ([$source_clone_path, $target_clone_path] as $path) {
-        //FIXME: Windows compatibility...
-        if ((!$this->doExec("rm -rf $path" . DIRECTORY_SEPARATOR . '.git') &&
-          $this->doExec("rm -rf $path"))
+        //FIXME: Windows compatibility... Better to do recursive delete with php.
+        if ((!$this->doExec("rm -rf $path" . DIRECTORY_SEPARATOR . '.git')  ||
+          !$this->doExec("rm -rf $path"))
         ) {
           $this->log()->info("Failed to remove {path}", ['path' => $path]);
         }
@@ -300,10 +302,10 @@ class SiteCloneCommand extends TerminusCommand {
     }
 
     $this->output()->outputValue("\nSOURCE SITE URLs (for reference)");
-    $this->output()->outputRecord($this->getSiteUrls($source_site));
+    $this->output()->outputRecord($this->getSiteUrls($source_site, $this->default_envs));
 
     $this->output()->outputValue("\nTARGET SITE URLs");
-    $this->output()->outputRecord($this->getSiteUrls($target_site));
+    $this->output()->outputRecord($this->getSiteUrls($target_site, $this->default_envs));
   }
 
   /**
@@ -413,10 +415,7 @@ class SiteCloneCommand extends TerminusCommand {
         ->info("Found {clone_path}. Attempting 'git pull'.", ['clone_path' => $clone_path]);
 
       if (!$this->doExec("cd $clone_path && git pull")) {
-        $this->log->error("Failed to git pull {site}", ['site' => $site_name]);
-        // remove it so we can attempt 'git clone'
-        // FIXME: Windows.
-        $this->doExec("rm -rf $clone_path");
+        throw new TerminusException("Failed to git pull {site} to {path}. (You might want to investigate/clean up that path.)", ['site' => $site_name, 'path' => $clone_path]);
       }
       else {
         return TRUE;
@@ -431,11 +430,10 @@ class SiteCloneCommand extends TerminusCommand {
     $git_command = $this->getConnectionInfo($site_name, "dev", "git_command");
     $git_command = preg_replace("/ $site_name\$/", " " . $this->clone_path . DIRECTORY_SEPARATOR . $site_name, $git_command);
     $this->log()
-      ->info("Git cloning$depth_option {site}...", ["site" => $site_name]);
+      ->info("Git cloning{depth_option} {site}...", ["site" => $site_name, "depth_option" => $depth_option]);
 
     if (!$this->doExec($git_command . $depth_option)) {
-      $this->log()->error("Failed to clone {site}", ['site' => $site_name]);
-      return FALSE;
+      throw new TerminusException("Failed to git clone {site} to {path}. (You might want to investigate/clean up that path.)", ['site' => $site_name, 'path' => $clone_path]);
     }
 
     return TRUE;
@@ -510,7 +508,7 @@ class SiteCloneCommand extends TerminusCommand {
 
     // If live is initialized and there are no pending commits in test or live, we can deploy the dev code all the way to live.
     if (($source_site_environments['live'] == "true") && ($deployable_commits['live'] == 0) && ($deployable_commits['test'] == 0)) {
-      if (!($this->doExec("cd $target_clone_path && git push -f", TRUE) &&
+      if (!($this->doExec("cd $target_clone_path && git push", TRUE) &&
         $this->deployToEnvironment($target_site_name, "live", $this->deploy_note)
       )
       ) {
@@ -519,7 +517,7 @@ class SiteCloneCommand extends TerminusCommand {
     }
     // If test is initialized and there are no pending commits in test, we can deploy the dev code all to test.
     elseif (($source_site_environments['test'] == "true") && ($deployable_commits['test'] == 0)) {
-      if (!($this->doExec("cd $target_clone_path && git push -f", TRUE) &&
+      if (!($this->doExec("cd $target_clone_path && git push", TRUE) &&
         $this->deployToEnvironment($target_site_name, "test", $this->deploy_note)
       )
       ) {
@@ -639,6 +637,11 @@ class SiteCloneCommand extends TerminusCommand {
         continue;
       }
 
+      //for now skip multidev environments
+      if (!in_array($environment, $this->default_envs)) {
+        continue;
+      }
+
       $this->loadContentFromBackup($source_site, $environment, $target_site->get('name'), $environment, [
         'database',
         'files'
@@ -649,6 +652,9 @@ class SiteCloneCommand extends TerminusCommand {
       // TODO: Disable mail? Since users may have various preferences re strategy, require them to do it in the content transformations, for now.
       // Apply user content transformations
       $this->callCustomMethods('transformContent', $target_site, $environment, $assoc_args);
+
+      // Clear caches
+      $this->clearCache($target_site, $environment);
     }
 
   }
@@ -734,12 +740,16 @@ class SiteCloneCommand extends TerminusCommand {
    * @param \Terminus\Models\Site $site
    * @param array $site_environments
    * @param array $elements
+   * @param array $filter_envs
    */
-  protected function backupInitializedEnvironments(\Terminus\Models\Site $site, array $site_environments, array $elements = ["all"]) {
+  protected function backupInitializedEnvironments(\Terminus\Models\Site $site, array $site_environments, array $elements = ["all"], array $filter_envs = []) {
     $site_name = $site->get("name");
 
     foreach ($site_environments as $env => $initialized) {
       if ($initialized == 'true') {
+        if (count($filter_envs) && !in_array($env, $filter_envs)) {
+          continue;
+        }
         foreach ($elements as $element) {
           $this->log()
             ->info("As requested creating a new backup of Site: {site} Environment: {env} Element: {element}", [
@@ -793,15 +803,23 @@ class SiteCloneCommand extends TerminusCommand {
 
   /**
    * @param array $backups
+   * @param array $filter_envs
+   * @param array $filter_elements
    * @return array
    */
-  protected function validateBackups(array $backups) {
+  protected function validateBackups(array $backups, array $filter_envs = [], array $filter_elements = []) {
 
     $missing = [];
     $stale = [];
 
     foreach ($backups as $env => $elements) {
+      if (count($filter_envs) && !in_array($env, $filter_envs)) {
+        continue;
+      }
       foreach ($elements as $element => $data) {
+        if (count($filter_elements) && !in_array($env, $filter_elements)) {
+          continue;
+        }
         if (!count($data)) {
           $missing[$env][] = $element;
         }
@@ -856,6 +874,18 @@ class SiteCloneCommand extends TerminusCommand {
       $workflow->wait();
       $this->workflowOutput($workflow);
     }
+  }
+
+  /**
+   * @param \Terminus\Models\Site $site
+   * @param $env
+   */
+  protected function clearCache(\Terminus\Models\Site $site, $env) {
+    $this->log()->info("Clearing site cache: Site: {site} Environment: {env}", ['site' => $site->get("name"), 'env' => $env]);
+    $environment = $site->environments->get($env);
+    $workflow    = $environment->clearCache();
+    $workflow->wait();
+    $this->workflowOutput($workflow);
   }
 
   /**
@@ -1051,12 +1081,13 @@ class SiteCloneCommand extends TerminusCommand {
 
   /**
    * @param \Terminus\Models\Site $site
+   * @param array $filter_envs
    * @return array
    */
-  protected function getSiteUrls(\Terminus\Models\Site $site) {
-    $target_site_env_info = $this->getEnvironmentsInfo($site);
-    $target_site_environments = array_column($target_site_env_info, 'initialized', 'id');
-    $target_site_name = $site->get('name');
+  protected function getSiteUrls(\Terminus\Models\Site $site, $filter_envs = []) {
+    $site_env_info = $this->getEnvironmentsInfo($site);
+    $site_environments = array_column($site_env_info, 'initialized', 'id');
+    $site_name = $site->get('name');
     $pantheon_dev_domain = $this->getPantheonDevHostname($site);
 
     $env_urls = [];
@@ -1069,11 +1100,11 @@ class SiteCloneCommand extends TerminusCommand {
     );
 
     // Enforce the order of the environments.
-    foreach (['dev', 'test', 'live'] as $env) {
-      if ($target_site_environments[$env] != "true") {
+    foreach ($this->default_envs as $env) {
+      if ($site_environments[$env] != "true") {
         continue;
       }
-      $env_urls[$env] = "http://$env-$target_site_name.$pantheon_dev_domain";
+      $env_urls[$env] = "http://$env-$site_name.$pantheon_dev_domain";
     }
 
     return $env_urls;
