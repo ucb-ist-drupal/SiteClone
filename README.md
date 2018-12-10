@@ -5,7 +5,10 @@ Until ~11/2018 this plugin worked with Terminus 0.13.x, but around then it appea
 
 Multidevs can be used for most of the same purposes that SiteClone served.  Our team has moved to a multidev workflow and we do not plan on fixing or maintaining this code.  
 
-# Terminus Plugin: site clone
+## Please see Andrew Taylor's site clone plugin
+[Terminus Site Clone](https://github.com/pantheon-systems/terminus-site-clone-plugin) may be the tool you want.
+
+# Terminus Plugin: site clone (Original README)
 
 ## Summary
 The command `terminus site clone` creates a new site which duplicates the environments, code (including git commits) and content of an existing Pantheon site. 
