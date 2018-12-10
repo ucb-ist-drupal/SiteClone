@@ -1,3 +1,10 @@
+# PLEASE NOTE:  This plugin was written for Terminus 0.13.x and no longer works.
+This plugin has never worked with terminus 1.x.
+
+Until ~11/2018 this plugin worked with Terminus 0.13.x, but around then it appears that Pantheon retired or changed some API end points and it stopped working. 
+
+Multidevs can be used for most of the same purposes that SiteClone served.  Our team has moved to a multidev workflow and we do not plan on fixing or maintaining this code.  
+
 # Terminus Plugin: site clone
 
 ## Summary
